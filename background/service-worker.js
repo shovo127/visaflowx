@@ -11,8 +11,12 @@ const VF_KEYS = {
   settings: "visaflowx.settings",
   status: "visaflowx.status",
   retryState: "visaflowx.retryState",
+  scheduleState: "visaflowx.scheduleState",
   notificationState: "visaflowx.notificationState"
 };
+
+const IVAC_SIGNIN_URL = "https://appointment.ivacbd.com/signin";
+const SCHEDULE_ALARM_NAME = "visaflowx-scheduled-start";
 
 const DEFAULT_SETTINGS = {
   automationEnabled: false,
@@ -56,9 +60,12 @@ const DEFAULT_STATUS = {
   actionRequired: "Press Start Automation when ready.",
   currentPage: "Unknown",
   automationEnabled: false,
+  activeAutomationTabId: null,
   timerStatus: "None",
   retryEndsAt: null,
   lastLoginAttempt: null,
+  scheduleEnabled: false,
+  scheduledAt: null,
   captchaState: "Unknown",
   otpDetected: false,
   lastError: "",
@@ -73,6 +80,15 @@ const DEFAULT_STATUS = {
   },
   lastEventAt: null,
   lastMessage: "Ready"
+};
+
+const DEFAULT_SCHEDULE_STATE = {
+  enabled: false,
+  scheduledAt: null,
+  createdAt: null,
+  lastStartedAt: null,
+  lastClearedAt: null,
+  lastError: ""
 };
 
 async function storageGet(key, fallback) {
@@ -99,6 +115,21 @@ async function setSettings(patch) {
 async function getStatus() {
   const saved = await storageGet(VF_KEYS.status, {});
   return mergeDeep(DEFAULT_STATUS, saved || {});
+}
+
+async function getScheduleState() {
+  const saved = await storageGet(VF_KEYS.scheduleState, {});
+  return mergeDeep(DEFAULT_SCHEDULE_STATE, saved || {});
+}
+
+async function setScheduleState(patch) {
+  const current = await getScheduleState();
+  const next = {
+    ...current,
+    ...(patch || {})
+  };
+  await storageSet(VF_KEYS.scheduleState, next);
+  return next;
 }
 
 async function setStatus(patch) {
@@ -140,6 +171,13 @@ function mergeDeep(base, patch) {
 
 function retryAlarmName(tabId) {
   return `visaflowx-retry-${tabId}`;
+}
+
+function formatScheduleTime(timestamp) {
+  if (!timestamp) {
+    return "No schedule set";
+  }
+  return new Date(timestamp).toLocaleString();
 }
 
 async function notify(notificationId, title, message) {
@@ -252,6 +290,57 @@ async function injectContentScripts(tabId) {
     target: { tabId },
     files: CONTENT_SCRIPT_FILES
   });
+}
+
+async function waitForTabReady(tabId, timeoutMs = 20000) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (tab && tab.status === "complete") {
+    return tab;
+  }
+
+  return new Promise((resolve) => {
+    let finished = false;
+    const timeout = setTimeout(async () => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(await chrome.tabs.get(tabId).catch(() => null));
+    }, timeoutMs);
+
+    function listener(updatedTabId, changeInfo, updatedTab) {
+      if (updatedTabId !== tabId || changeInfo.status !== "complete") {
+        return;
+      }
+      finished = true;
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(updatedTab);
+    }
+
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function focusOrOpenSigninTab() {
+  const tabs = await chrome.tabs.query({ url: "https://appointment.ivacbd.com/*" });
+  let tab = tabs.find((candidate) => isIvAcSigninUrl(candidate.url)) || null;
+
+  if (!tab) {
+    tab = await chrome.tabs.create({
+      url: IVAC_SIGNIN_URL,
+      active: true
+    });
+  } else {
+    await chrome.tabs.update(tab.id, { active: true });
+    if (tab.windowId != null) {
+      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    }
+  }
+
+  await waitForTabReady(tab.id);
+  return chrome.tabs.get(tab.id);
 }
 
 function sleep(ms) {
@@ -445,6 +534,7 @@ async function setAutomation(enabled) {
   const settings = await setSettings({ automationEnabled: enabled });
   await setStatus({
     automationEnabled: enabled,
+    activeAutomationTabId: enabled ? null : null,
     workflowState: VF_STATES.IDLE,
     state: VF_STATE_LABELS.IDLE,
     actionRequired: enabled
@@ -489,6 +579,14 @@ async function setAutomation(enabled) {
     return tabResult;
   }
 
+  await setStatus({
+    automationEnabled: true,
+    activeAutomationTabId: tabResult.tabId,
+    scheduleEnabled: false,
+    scheduledAt: null,
+    lastMessage: "Automation running"
+  });
+
   return {
     ok: true,
     settings,
@@ -496,6 +594,175 @@ async function setAutomation(enabled) {
     activeTabUrl: tabResult.activeTabUrl,
     injected: Boolean(tabResult.injected)
   };
+}
+
+async function startAutomationFromSchedule() {
+  const schedule = await getScheduleState();
+  await setScheduleState({
+    enabled: false,
+    scheduledAt: null,
+    lastStartedAt: Date.now(),
+    lastError: ""
+  });
+
+  await setStatus({
+    workflowState: VF_STATES.SCHEDULED,
+    state: VF_STATE_LABELS.SCHEDULED,
+    scheduleEnabled: false,
+    scheduledAt: null,
+    actionRequired: "Scheduled run started. Opening IVAC sign-in page.",
+    lastMessage: "Scheduled run started"
+  });
+
+  await notify(
+    "visaflowx-scheduled-started",
+    "VisaFlowX Scheduled Run Started",
+    "Opening the IVAC sign-in workflow now."
+  );
+
+  try {
+    const tab = await focusOrOpenSigninTab();
+    await setStatus({
+      debug: {
+        activeTabUrl: tab && tab.url ? tab.url : IVAC_SIGNIN_URL,
+        lastRuntimeMessage: "SCHEDULE_RUN"
+      }
+    });
+    const result = await setAutomation(true);
+    if (!result.ok) {
+      await setScheduleState({
+        ...schedule,
+        enabled: false,
+        scheduledAt: null,
+        lastStartedAt: Date.now(),
+        lastError: result.error || "Scheduled start failed."
+      });
+      await notify("visaflowx-schedule-error", "Scheduled Run Error", result.error || "Scheduled start failed.");
+    }
+    return result;
+  } catch (error) {
+    const message = error && error.message ? error.message : "Scheduled start failed.";
+    await setScheduleState({
+      enabled: false,
+      scheduledAt: null,
+      lastStartedAt: Date.now(),
+      lastError: message
+    });
+    await setStatus({
+      workflowState: VF_STATES.ERROR,
+      state: VF_STATE_LABELS.ERROR,
+      lastError: message,
+      actionRequired: "Open the IVAC sign-in page and start manually.",
+      lastMessage: message
+    });
+    await notify("visaflowx-schedule-error", "Scheduled Run Error", message);
+    return {
+      ok: false,
+      error: message
+    };
+  }
+}
+
+async function scheduleRun(scheduledAt) {
+  const when = Number(scheduledAt);
+  const credentials = await storageGet(VF_KEYS.credentials, null);
+  if (!hasCredentials(credentials)) {
+    const error = "Save contact number and password before scheduling.";
+    await setStatus({
+      workflowState: VF_STATES.ERROR,
+      state: VF_STATE_LABELS.ERROR,
+      lastError: error,
+      actionRequired: "Save credentials, then schedule the run.",
+      lastMessage: error
+    });
+    return { ok: false, error };
+  }
+
+  if (!Number.isFinite(when) || when <= Date.now() + 15000) {
+    const error = "Choose a future date and time at least 15 seconds from now.";
+    await setStatus({
+      workflowState: VF_STATES.ERROR,
+      state: VF_STATE_LABELS.ERROR,
+      lastError: error,
+      actionRequired: "Choose a valid future schedule time.",
+      lastMessage: error
+    });
+    return { ok: false, error };
+  }
+
+  await chrome.alarms.clear(SCHEDULE_ALARM_NAME);
+  await chrome.alarms.create(SCHEDULE_ALARM_NAME, { when });
+  const scheduleState = await setScheduleState({
+    enabled: true,
+    scheduledAt: when,
+    createdAt: Date.now(),
+    lastError: ""
+  });
+  await setStatus({
+    workflowState: VF_STATES.SCHEDULED,
+    state: VF_STATE_LABELS.SCHEDULED,
+    scheduleEnabled: true,
+    scheduledAt: when,
+    actionRequired: "No action required. VisaFlowX will start at the scheduled time.",
+    lastError: "",
+    lastMessage: `Scheduled run set for ${formatScheduleTime(when)}`
+  });
+  await notify(
+    "visaflowx-schedule-set",
+    "VisaFlowX Scheduled",
+    `Scheduled run set for ${formatScheduleTime(when)}`
+  );
+  return {
+    ok: true,
+    scheduleState
+  };
+}
+
+async function clearSchedule() {
+  await chrome.alarms.clear(SCHEDULE_ALARM_NAME);
+  const scheduleState = await setScheduleState({
+    enabled: false,
+    scheduledAt: null,
+    lastClearedAt: Date.now(),
+    lastError: ""
+  });
+  const status = await getStatus();
+  await setStatus({
+    workflowState: status.automationEnabled ? status.workflowState : VF_STATES.IDLE,
+    state: status.automationEnabled ? status.state : VF_STATE_LABELS.IDLE,
+    scheduleEnabled: false,
+    scheduledAt: null,
+    actionRequired: status.automationEnabled
+      ? status.actionRequired
+      : "Schedule cleared. Press Start Automation or schedule a new run.",
+    lastMessage: "Schedule cleared"
+  });
+  return {
+    ok: true,
+    scheduleState
+  };
+}
+
+async function restoreScheduleAlarm() {
+  const scheduleState = await getScheduleState();
+  if (!scheduleState.enabled || !scheduleState.scheduledAt) {
+    return;
+  }
+
+  if (scheduleState.scheduledAt <= Date.now()) {
+    await clearSchedule();
+    return;
+  }
+
+  await chrome.alarms.create(SCHEDULE_ALARM_NAME, { when: scheduleState.scheduledAt });
+  await setStatus({
+    workflowState: VF_STATES.SCHEDULED,
+    state: VF_STATE_LABELS.SCHEDULED,
+    scheduleEnabled: true,
+    scheduledAt: scheduleState.scheduledAt,
+    actionRequired: "No action required. VisaFlowX will start at the scheduled time.",
+    lastMessage: `Scheduled run restored for ${formatScheduleTime(scheduleState.scheduledAt)}`
+  });
 }
 
 async function sendCommandToIvAcTab(message) {
@@ -581,10 +848,12 @@ chrome.runtime.onInstalled.addListener(async () => {
     ...DEFAULT_STATUS,
     lastMessage: "VisaFlowX installed. Press Start Automation when ready."
   });
+  await restoreScheduleAlarm();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await resetRuntimeAutomation("Browser started. Press Start Automation when ready.");
+  await restoreScheduleAlarm();
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
@@ -602,6 +871,11 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === SCHEDULE_ALARM_NAME) {
+    await startAutomationFromSchedule();
+    return;
+  }
+
   if (!alarm.name.startsWith("visaflowx-retry-")) {
     return;
   }
@@ -622,6 +896,24 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const status = await getStatus();
+  if (!status.automationEnabled || status.activeAutomationTabId !== tabId) {
+    return;
+  }
+
+  await setSettings({ automationEnabled: false });
+  await setStatus({
+    workflowState: VF_STATES.IDLE,
+    state: VF_STATE_LABELS.IDLE,
+    automationEnabled: false,
+    activeAutomationTabId: null,
+    actionRequired: "Automation stopped because the IVAC tab was closed.",
+    lastMessage: "Automation Stopped",
+    lastError: ""
+  });
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message && message.type) {
@@ -637,7 +929,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               activeTabUrl: activeTab && activeTab.url ? activeTab.url : ""
             }
           },
-          retryState: await storageGet(VF_KEYS.retryState, null)
+          retryState: await storageGet(VF_KEYS.retryState, null),
+          scheduleState: await getScheduleState()
         });
         break;
       }
@@ -650,6 +943,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case "START_AUTOMATION": {
         const result = await setAutomation(true);
+        sendResponse(result);
+        break;
+      }
+
+      case "SCHEDULE_RUN": {
+        const result = await scheduleRun(message.scheduledAt);
+        sendResponse(result);
+        break;
+      }
+
+      case "CLEAR_SCHEDULE": {
+        const result = await clearSchedule();
         sendResponse(result);
         break;
       }
@@ -731,6 +1036,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         setTimeout(() => {
           stopAlarm();
         }, 2500);
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case "TEST_NOTIFICATIONS": {
+        await notify(
+          "visaflowx-test-notification",
+          "VisaFlowX Test Notification",
+          "Notifications are working."
+        );
         sendResponse({ ok: true });
         break;
       }

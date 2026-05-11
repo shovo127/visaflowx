@@ -6,6 +6,7 @@ window.VisaFlowXStorage = (() => {
     settings: "visaflowx.settings",
     status: "visaflowx.status",
     retryState: "visaflowx.retryState",
+    scheduleState: "visaflowx.scheduleState",
     notificationState: "visaflowx.notificationState"
   };
 
@@ -51,9 +52,12 @@ window.VisaFlowXStorage = (() => {
     actionRequired: "Press Start Automation when ready.",
     currentPage: "Unknown",
     automationEnabled: false,
+    activeAutomationTabId: null,
     timerStatus: "None",
     retryEndsAt: null,
     lastLoginAttempt: null,
+    scheduleEnabled: false,
+    scheduledAt: null,
     captchaState: "Unknown",
     otpDetected: false,
     lastError: "",
@@ -68,6 +72,15 @@ window.VisaFlowXStorage = (() => {
     },
     lastEventAt: null,
     lastMessage: "Ready"
+  };
+
+  const DEFAULT_SCHEDULE_STATE = {
+    enabled: false,
+    scheduledAt: null,
+    createdAt: null,
+    lastStartedAt: null,
+    lastClearedAt: null,
+    lastError: ""
   };
 
   function mergeDeep(base, patch) {
@@ -159,6 +172,11 @@ window.VisaFlowXStorage = (() => {
     return get(KEYS.retryState, null);
   }
 
+  async function getScheduleState() {
+    const saved = await get(KEYS.scheduleState, {});
+    return mergeDeep(DEFAULT_SCHEDULE_STATE, saved || {});
+  }
+
   async function clearRetryState() {
     await remove(KEYS.retryState);
   }
@@ -167,6 +185,7 @@ window.VisaFlowXStorage = (() => {
     KEYS,
     DEFAULT_SETTINGS,
     DEFAULT_STATUS,
+    DEFAULT_SCHEDULE_STATE,
     get,
     set,
     remove,
@@ -178,6 +197,7 @@ window.VisaFlowXStorage = (() => {
     getStatus,
     saveStatus,
     getRetryState,
+    getScheduleState,
     clearRetryState
   };
 })();

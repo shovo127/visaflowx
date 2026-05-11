@@ -350,7 +350,9 @@ label {
 
 input[type="text"],
 input[type="password"],
-input[type="number"] {
+input[type="number"],
+input[type="date"],
+input[type="time"] {
   width: 100%;
   min-height: 42px;
   padding: 10px 12px;
@@ -370,6 +372,10 @@ input[type="number"] {
 
 .button-row.two {
   grid-template-columns: 1fr 1fr;
+}
+
+.button-row.one {
+  grid-template-columns: 1fr;
 }
 
 .monitor-grid {
@@ -436,6 +442,20 @@ input[type="number"] {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius);
   background: rgba(2, 6, 23, 0.52);
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.schedule-grid label {
+  margin-top: 0;
+}
+
+.schedule-display {
+  margin-top: 10px;
 }
 
 .retry-display strong {

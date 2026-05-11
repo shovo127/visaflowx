@@ -139,7 +139,7 @@ window.VisaFlowXAutomation = (() => {
       await this.setState(STATES.IDLE, {
         automationEnabled: false,
         actionRequired: "Press Start Automation when ready.",
-        lastMessage: "Automation stopped"
+        lastMessage: "Automation Stopped"
       });
       return {
         ok: true
@@ -317,12 +317,16 @@ window.VisaFlowXAutomation = (() => {
       }
 
       if (pageInfo.type === window.VisaFlowXDetector.PAGE_TYPES.SESSION_EXPIRED) {
+        this.running = false;
+        this.stopObserver();
+        await window.VisaFlowXStorage.saveSettings({ automationEnabled: false });
         await this.setState(STATES.ERROR, {
           state: "Session Expired",
           currentPage: "SESSION_EXPIRED_PAGE",
+          automationEnabled: false,
           lastError: pageInfo.reason,
           actionRequired: "Refresh the IVAC page and start automation again.",
-          lastMessage: pageInfo.reason
+          lastMessage: "Automation Stopped"
         });
         await window.VisaFlowXNotify.notification(
           "visaflowx-session-expired",

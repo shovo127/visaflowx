@@ -38,6 +38,8 @@ for (const file of [
   "utils/dom-utils.js",
   "utils/parser.js",
   "utils/logger.js",
+  "docs/ARCHITECTURE.md",
+  "docs/TESTING.md",
   "assets/sounds/videoplayback.m4a",
   "README.md",
   "CHANGELOG.md",

@@ -23,6 +23,7 @@ https://appointment.ivacbd.com/signin
 - Uses `assets/sounds/videoplayback.m4a` as the primary alarm sound.
 - Shows desktop notifications.
 - Reads visible retry/cooldown messages and retries automatically after the countdown.
+- Schedules a future automation start using Chrome alarms.
 
 ## Important Captcha Limitation
 
@@ -73,9 +74,12 @@ Note: credentials are stored in `chrome.storage.local` because this build uses t
 - Start Automation
 - Stop Automation
 - Save Credentials
+- Schedule Run
+- Clear Schedule
 - Delete Credentials
 - Test Autofill
 - Test Detection
+- Test Notifications
 - Reset Timers
 - Fast, Balanced, and Safe delay modes
 - Volume slider
@@ -86,6 +90,7 @@ Note: credentials are stored in `chrome.storage.local` because this build uses t
 ## Status Labels
 
 - IDLE
+- SCHEDULED
 - PAGE_DETECTED
 - AUTOFILLING
 - WAITING_FOR_VERIFICATION
@@ -93,7 +98,22 @@ Note: credentials are stored in `chrome.storage.local` because this build uses t
 - SIGNING_IN
 - OTP_DETECTED
 - RETRY_WAIT
+- COMPLETED
 - ERROR
+
+## Scheduler
+
+The Scheduler card lets the user choose a date and time for a future run. VisaFlowX stores that schedule locally and creates a `chrome.alarms` entry.
+
+When the scheduled alarm fires, VisaFlowX:
+
+1. Opens or focuses `https://appointment.ivacbd.com/signin`.
+2. Waits for the tab to finish loading.
+3. Injects content scripts if they are missing.
+4. Starts the normal login workflow.
+5. Shows a desktop notification that the scheduled run started.
+
+The popup shows the next scheduled run and a live countdown. **Clear Schedule** disables the alarm.
 
 ## UX Flow
 
@@ -129,6 +149,7 @@ Core modules:
 - `content/detector.js`: page, captcha, OTP, and Sign In detection.
 - `content/retry-engine.js`: visible cooldown parsing and retry scheduling.
 - `background/offscreen.js`: looping alarm playback with `videoplayback.m4a`.
+- `background/service-worker.js`: schedule alarms, notifications, tab orchestration, and content-script injection.
 
 ## Developer Debug
 

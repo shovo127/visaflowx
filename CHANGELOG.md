@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Added Scheduler card with date/time scheduling, next-run display, countdown, Schedule Run, and Clear Schedule.
+- Added `chrome.alarms` scheduled start flow that opens or focuses the IVAC sign-in page and starts automation.
+- Added scheduled-run desktop notification and schedule restoration on browser startup.
+- Added auto-stop when the active automation tab is closed.
+- Added docs for architecture and testing.
+
 ## 1.1.0
 
 - Redesigned popup around a clear Start Automation workflow.

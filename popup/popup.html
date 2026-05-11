@@ -84,6 +84,10 @@
             <strong id="otpState">No</strong>
           </div>
           <div class="wide">
+            <span>Last attempt</span>
+            <strong id="lastAttempt">Never</strong>
+          </div>
+          <div class="wide">
             <span>Last action</span>
             <strong id="lastMessage">Ready</strong>
           </div>
@@ -91,6 +95,31 @@
             <span>Last error</span>
             <strong id="lastError">None</strong>
           </div>
+        </div>
+      </section>
+
+      <section class="card scheduler-card" aria-labelledby="schedulerTitle">
+        <div class="section-heading">
+          <h2 id="schedulerTitle">Scheduler</h2>
+          <span id="scheduleBadge" class="mini-badge">Disabled</span>
+        </div>
+        <div class="schedule-grid">
+          <label for="scheduleDate">
+            Date
+            <input id="scheduleDate" type="date">
+          </label>
+          <label for="scheduleTime">
+            Time
+            <input id="scheduleTime" type="time">
+          </label>
+        </div>
+        <div class="retry-display schedule-display">
+          <strong id="scheduleCountdown">No schedule</strong>
+          <span id="nextScheduledRun">Next scheduled run: none</span>
+        </div>
+        <div class="button-row two">
+          <button id="scheduleRun" class="solid-button" type="button">Schedule Run</button>
+          <button id="clearSchedule" class="ghost-button danger" type="button">Clear Schedule</button>
         </div>
       </section>
 
@@ -120,6 +149,9 @@
         </label>
         <div class="button-row two">
           <button id="testSound" class="ghost-button" type="button">Test Sound</button>
+          <button id="testNotifications" class="ghost-button" type="button">Test Notifications</button>
+        </div>
+        <div class="button-row one">
           <button id="stopAlarm" class="solid-button secondary" type="button">Stop Alarm</button>
         </div>
       </section>

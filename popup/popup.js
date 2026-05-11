@@ -22,6 +22,7 @@ const ui = {
   statusState: document.getElementById("statusState"),
   captchaState: document.getElementById("captchaState"),
   otpState: document.getElementById("otpState"),
+  lastAttempt: document.getElementById("lastAttempt"),
   lastMessage: document.getElementById("lastMessage"),
   lastError: document.getElementById("lastError"),
   testDetection: document.getElementById("testDetection"),
@@ -32,7 +33,15 @@ const ui = {
   volume: document.getElementById("volume"),
   mute: document.getElementById("mute"),
   testSound: document.getElementById("testSound"),
+  testNotifications: document.getElementById("testNotifications"),
   stopAlarm: document.getElementById("stopAlarm"),
+  scheduleBadge: document.getElementById("scheduleBadge"),
+  scheduleDate: document.getElementById("scheduleDate"),
+  scheduleTime: document.getElementById("scheduleTime"),
+  scheduleCountdown: document.getElementById("scheduleCountdown"),
+  nextScheduledRun: document.getElementById("nextScheduledRun"),
+  scheduleRun: document.getElementById("scheduleRun"),
+  clearSchedule: document.getElementById("clearSchedule"),
   delayModeLabel: document.getElementById("delayModeLabel"),
   autofillDelay: document.getElementById("autofillDelay"),
   signInDelay: document.getElementById("signInDelay"),
@@ -50,6 +59,7 @@ const ui = {
 
 let latestStatus = null;
 let latestSettings = null;
+let latestScheduleState = null;
 let countdownTimer = null;
 
 function titleCase(value) {
@@ -71,6 +81,26 @@ function formatTime(value) {
     minute: "2-digit",
     second: "2-digit"
   });
+}
+
+function formatDateTimeLocal(timestamp) {
+  if (!timestamp) {
+    return "none";
+  }
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "none";
+  }
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatInputDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function normalizeState(status = {}) {
@@ -197,6 +227,34 @@ function renderSettings(settings) {
   ui.mute.checked = Boolean(settings.sound && settings.sound.muted);
 }
 
+function renderSchedule(scheduleState, status) {
+  latestScheduleState = scheduleState || {
+    enabled: false,
+    scheduledAt: null
+  };
+
+  const enabled = Boolean(latestScheduleState.enabled && latestScheduleState.scheduledAt);
+  ui.scheduleBadge.textContent = enabled ? "Enabled" : "Disabled";
+  ui.scheduleBadge.classList.toggle("saved", enabled);
+  ui.nextScheduledRun.textContent = enabled
+    ? `Next scheduled run: ${formatDateTimeLocal(latestScheduleState.scheduledAt)}`
+    : "Next scheduled run: none";
+  ui.scheduleCountdown.textContent = enabled
+    ? window.VisaFlowXTimers.formatRemaining(latestScheduleState.scheduledAt - Date.now())
+    : "No schedule";
+
+  if (enabled && !ui.scheduleDate.value && !ui.scheduleTime.value) {
+    const date = new Date(latestScheduleState.scheduledAt);
+    ui.scheduleDate.value = formatInputDate(date);
+    ui.scheduleTime.value = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }
+
+  if (status.scheduleEnabled && status.scheduledAt) {
+    ui.scheduleBadge.textContent = "Enabled";
+    ui.scheduleBadge.classList.add("saved");
+  }
+}
+
 function renderStatus(status, settings) {
   latestStatus = status;
   latestSettings = settings;
@@ -210,6 +268,7 @@ function renderStatus(status, settings) {
   ui.statusState.textContent = stateLabel;
   ui.captchaState.textContent = status.captchaState || "Unknown";
   ui.otpState.textContent = status.otpDetected ? "Detected" : "No";
+  ui.lastAttempt.textContent = status.lastLoginAttempt ? formatTime(status.lastLoginAttempt) : "Never";
   ui.lastMessage.textContent = status.lastMessage || "Ready";
   ui.lastError.textContent = status.lastError || "None";
   ui.notificationState.textContent = status.otpDetected ? "Alarm active" : "Ready";
@@ -233,6 +292,8 @@ function renderDebug(status) {
 }
 
 function updateCountdown() {
+  updateScheduleCountdown();
+
   if (!latestStatus || !latestStatus.retryEndsAt) {
     ui.timerStatus.textContent = latestStatus && latestStatus.timerStatus ? latestStatus.timerStatus : "None";
     ui.retryEndsAt.textContent = "No retry scheduled";
@@ -250,14 +311,33 @@ function updateCountdown() {
   ui.retryEndsAt.textContent = `Ends at ${formatTime(latestStatus.retryEndsAt)}`;
 }
 
+function updateScheduleCountdown() {
+  if (!latestScheduleState || !latestScheduleState.enabled || !latestScheduleState.scheduledAt) {
+    if (ui.scheduleCountdown) {
+      ui.scheduleCountdown.textContent = "No schedule";
+    }
+    return;
+  }
+
+  const remaining = latestScheduleState.scheduledAt - Date.now();
+  ui.scheduleCountdown.textContent = remaining > 0
+    ? window.VisaFlowXTimers.formatRemaining(remaining)
+    : "Starting now";
+}
+
 async function refresh() {
   const credentials = await window.VisaFlowXStorage.getCredentials();
   const state = await runtimeMessage({ type: "GET_STATE" });
   const settings = state && state.settings ? state.settings : await window.VisaFlowXStorage.getSettings();
   const status = state && state.status ? state.status : await window.VisaFlowXStorage.getStatus();
+  const scheduleState = state && state.scheduleState ? state.scheduleState : {
+    enabled: false,
+    scheduledAt: null
+  };
 
   renderCredentials(credentials);
   renderSettings(settings);
+  renderSchedule(scheduleState, status);
   renderStatus(status, settings);
 }
 
@@ -302,6 +382,46 @@ async function commandActiveTab(type) {
   const response = await runtimeMessage({ type });
   if (!response || response.ok === false) {
     setTemporaryMessage(response && response.error ? response.error : "Open the IVAC tab and try again.");
+  }
+  await refresh();
+}
+
+function getScheduledTimestamp() {
+  if (!ui.scheduleDate.value || !ui.scheduleTime.value) {
+    return null;
+  }
+  const scheduled = new Date(`${ui.scheduleDate.value}T${ui.scheduleTime.value}:00`);
+  const timestamp = scheduled.getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+async function scheduleRun() {
+  const scheduledAt = getScheduledTimestamp();
+  if (!scheduledAt || scheduledAt <= Date.now()) {
+    setTemporaryMessage("Choose a future date and time before scheduling.");
+    return;
+  }
+
+  const response = await runtimeMessage({
+    type: "SCHEDULE_RUN",
+    scheduledAt
+  });
+  if (!response || response.ok === false) {
+    setTemporaryMessage(response && response.error ? response.error : "Could not schedule run.");
+  } else {
+    setTemporaryMessage("Scheduled run saved.");
+  }
+  await refresh();
+}
+
+async function clearSchedule() {
+  const response = await runtimeMessage({ type: "CLEAR_SCHEDULE" });
+  if (!response || response.ok === false) {
+    setTemporaryMessage(response && response.error ? response.error : "Could not clear schedule.");
+  } else {
+    ui.scheduleDate.value = "";
+    ui.scheduleTime.value = "";
+    setTemporaryMessage("Schedule cleared.");
   }
   await refresh();
 }
@@ -372,7 +492,10 @@ function bindEvents() {
       }
     });
   });
+  ui.testNotifications.addEventListener("click", () => runtimeMessage({ type: "TEST_NOTIFICATIONS" }));
   ui.stopAlarm.addEventListener("click", () => runtimeMessage({ type: "STOP_ALARM" }));
+  ui.scheduleRun.addEventListener("click", scheduleRun);
+  ui.clearSchedule.addEventListener("click", clearSchedule);
   ui.saveDelays.addEventListener("click", saveDelayValues);
   document.querySelectorAll("[data-delay-mode]").forEach((button) => {
     button.addEventListener("click", () => setDelayMode(button.dataset.delayMode));
@@ -387,7 +510,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
     changes["visaflowx.status"] ||
     changes["visaflowx.settings"] ||
     changes["visaflowx.credentials"] ||
-    changes["visaflowx.notificationState"]
+    changes["visaflowx.notificationState"] ||
+    changes["visaflowx.scheduleState"]
   ) {
     refresh();
   }
