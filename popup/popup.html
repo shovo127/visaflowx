@@ -3,236 +3,235 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>VisaFlowX</title>
+    <title>VisaFlowX Universal</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
     <main class="app-shell" aria-live="polite">
-      <header class="topbar">
+      <header class="app-header">
         <div>
-          <p class="eyebrow">IVAC workflow assistant</p>
-          <h1>VisaFlowX</h1>
+          <p class="eyebrow">Universal workflow assistant</p>
+          <h1>VisaFlowX Universal</h1>
         </div>
-        <span id="automationBadge" class="state-badge" aria-label="Current automation state">Idle</span>
+        <span id="stateBadge" class="state-badge idle">Idle</span>
       </header>
 
-      <section class="hero-card" aria-labelledby="quickActionsTitle">
+      <section class="hero-card" aria-labelledby="quick-actions-title">
         <div class="hero-copy">
-          <h2 id="quickActionsTitle">Quick Actions</h2>
-          <p id="primaryStatusText">Ready to automate IVAC login workflow.</p>
+          <h2 id="quick-actions-title">Dashboard</h2>
+          <p id="statusText">Ready to monitor and automate safe workflow actions.</p>
         </div>
-        <div class="primary-actions">
-          <button id="startAutomation" class="start-button" type="button" aria-label="Start automation">
-            <span>Start Automation</span>
-          </button>
-          <button id="stopAutomation" class="stop-button" type="button" aria-label="Stop automation">Stop</button>
-        </div>
-        <div class="hint-row">
-          <span>Hotkey</span>
-          <strong>Ctrl + Shift + L</strong>
+        <div class="action-grid">
+          <button id="startBtn" class="btn btn-primary" type="button">Start Monitoring</button>
+          <button id="stopBtn" class="btn btn-secondary" type="button">Stop</button>
+          <button id="selectAreaBtn" class="btn btn-secondary" type="button">Select Area</button>
+          <button id="testNotificationBtn" class="btn btn-secondary" type="button">Test Notification</button>
         </div>
       </section>
 
-      <section class="card status-card" aria-labelledby="automationStatusTitle">
-        <div class="section-heading">
-          <h2 id="automationStatusTitle">Automation Status</h2>
-          <span id="actionRequired" class="action-pill">Press Start Automation when ready.</span>
-        </div>
-        <ol id="workflowStages" class="workflow-list" aria-label="Automation workflow stages"></ol>
+      <section class="status-grid" aria-label="Live automation status">
+        <article class="metric-card">
+          <span>Active Site</span>
+          <strong id="activeSite">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>Workflow Stage</span>
+          <strong id="workflowStage">Idle</strong>
+        </article>
+        <article class="metric-card">
+          <span>Retry Timer</span>
+          <strong id="retryTimer">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>Current Rule</span>
+          <strong id="currentRule">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>Monitored Text</span>
+          <strong id="monitoredText">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>Last Action</span>
+          <strong id="lastActionMetric">-</strong>
+        </article>
       </section>
 
-      <section class="card credentials-card" aria-labelledby="credentialsTitle">
-        <div class="section-heading">
-          <h2 id="credentialsTitle">Credentials</h2>
-          <span id="credentialBadge" class="mini-badge">Not saved</span>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Profiles</h2>
+          <select id="profileSelect" aria-label="Active profile"></select>
         </div>
-        <label for="contactNumber">Contact Number</label>
-        <input id="contactNumber" type="text" inputmode="numeric" autocomplete="username" placeholder="01XXXXXXXXX" aria-describedby="credentialHelp">
-
-        <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="Password">
-
-        <p id="credentialHelp" class="helper-text">Credentials are stored in Chrome extension local storage and never printed in logs.</p>
-
+        <div class="form-grid">
+          <label>
+            Profile Name
+            <input id="profileName" type="text" autocomplete="off">
+          </label>
+          <label>
+            Start URL
+            <input id="startUrl" type="url" placeholder="https://example.com">
+          </label>
+          <label class="wide">
+            URL Match Patterns
+            <input id="urlPatterns" type="text" placeholder="example.com, *.portal.edu/*">
+          </label>
+        </div>
         <div class="button-row">
-          <button id="saveCredentials" class="solid-button" type="button">Save</button>
-          <button id="testAutofill" class="ghost-button" type="button">Test Autofill</button>
-          <button id="deleteCredentials" class="ghost-button danger" type="button">Delete</button>
+          <button id="saveProfileBtn" class="btn btn-primary" type="button">Save Profile</button>
+          <button id="deleteProfileBtn" class="btn btn-ghost" type="button">Delete Profile</button>
         </div>
       </section>
 
-      <section class="card monitor-card" aria-labelledby="liveMonitorTitle">
-        <div class="section-heading">
-          <h2 id="liveMonitorTitle">Live Monitor</h2>
-          <button id="testDetection" class="icon-button" type="button" aria-label="Test page detection">Test</button>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Monitor Rules</h2>
+          <span id="ruleCount" class="mini-badge">0 rules</span>
         </div>
-        <div class="monitor-grid">
-          <div>
-            <span>Current page</span>
-            <strong id="currentPage">Unknown</strong>
-          </div>
-          <div>
-            <span>State</span>
-            <strong id="statusState">Idle</strong>
-          </div>
-          <div>
-            <span>Captcha</span>
-            <strong id="captchaState">Unknown</strong>
-          </div>
-          <div>
-            <span>OTP</span>
-            <strong id="otpState">No</strong>
-          </div>
-          <div class="wide">
-            <span>Last attempt</span>
-            <strong id="lastAttempt">Never</strong>
-          </div>
-          <div class="wide">
-            <span>Last action</span>
-            <strong id="lastMessage">Ready</strong>
-          </div>
-          <div class="wide error-row">
-            <span>Last error</span>
-            <strong id="lastError">None</strong>
-          </div>
-        </div>
-      </section>
-
-      <section class="card scheduler-card" aria-labelledby="schedulerTitle">
-        <div class="section-heading">
-          <h2 id="schedulerTitle">Scheduler</h2>
-          <span id="scheduleBadge" class="mini-badge">Disabled</span>
-        </div>
-        <div class="schedule-grid">
-          <label for="scheduleDate">
-            Date
-            <input id="scheduleDate" type="date">
+        <div class="form-grid">
+          <label>
+            When
+            <select id="conditionType">
+              <option value="textAppears">Text appears</option>
+              <option value="selectorExists">Selector exists</option>
+              <option value="buttonEnabled">Button enabled</option>
+              <option value="pageError">Page error detected</option>
+              <option value="urlMatches">URL matches</option>
+            </select>
           </label>
-          <label for="scheduleTime">
-            Time
-            <input id="scheduleTime" type="time">
+          <label>
+            Text / Pattern
+            <input id="conditionText" type="text" placeholder="BOOK NOW">
+          </label>
+          <label>
+            Target Selector
+            <input id="targetSelector" type="text" placeholder="button, a, input[type='submit']">
+          </label>
+          <label>
+            Target Text
+            <input id="targetText" type="text" placeholder="Book">
+          </label>
+          <label>
+            Action
+            <select id="actionType">
+              <option value="click">Click element</option>
+              <option value="focus">Focus input</option>
+              <option value="fill">Fill input</option>
+              <option value="reload">Reload page</option>
+              <option value="back">Go back</option>
+              <option value="openUrl">Open URL</option>
+              <option value="scrollToElement">Scroll to element</option>
+            </select>
+          </label>
+          <label>
+            Fill Value / URL
+            <input id="actionValue" type="text" placeholder="Only needed for fill/open URL">
           </label>
         </div>
-        <div class="retry-display schedule-display">
-          <strong id="scheduleCountdown">No schedule</strong>
-          <span id="nextScheduledRun">Next scheduled run: none</span>
+        <div class="button-row">
+          <button id="saveRuleBtn" class="btn btn-primary" type="button">Add Rule</button>
+          <button id="runRuleBtn" class="btn btn-secondary" type="button">Run First Rule</button>
         </div>
-        <div class="button-row two">
-          <button id="scheduleRun" class="solid-button" type="button">Schedule Run</button>
-          <button id="clearSchedule" class="ghost-button danger" type="button">Clear Schedule</button>
+        <div id="ruleList" class="rule-list" aria-label="Configured rules"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Scheduler</h2>
+          <span id="scheduleBadge" class="mini-badge">No schedule</span>
+        </div>
+        <div class="form-grid">
+          <label>
+            Start Date & Time
+            <input id="scheduleDateTime" type="datetime-local">
+          </label>
+          <label>
+            Recurring
+            <select id="scheduleRecurring">
+              <option value="none">One time</option>
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </label>
+        </div>
+        <div class="button-row">
+          <button id="scheduleBtn" class="btn btn-primary" type="button">Schedule Run</button>
+          <button id="clearScheduleBtn" class="btn btn-ghost" type="button">Clear Schedule</button>
         </div>
       </section>
 
-      <section class="card retry-card" aria-labelledby="retryTitle">
-        <div class="section-heading">
-          <h2 id="retryTitle">Retry Timer</h2>
-          <button id="resetTimers" class="ghost-button compact" type="button">Reset</button>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Retry Engine</h2>
+          <span id="retryModeBadge" class="mini-badge">Soft refresh</span>
         </div>
-        <div class="retry-display">
-          <strong id="timerStatus">None</strong>
-          <span id="retryEndsAt">No retry scheduled</span>
-        </div>
-      </section>
-
-      <section class="card notification-card" aria-labelledby="notificationsTitle">
-        <div class="section-heading">
-          <h2 id="notificationsTitle">Notifications</h2>
-          <span id="notificationState" class="mini-badge">Ready</span>
-        </div>
-        <label class="range-label" for="volume">
-          <span>Alarm Volume</span>
-          <input id="volume" type="range" min="0" max="100" value="100">
-        </label>
-        <label class="toggle">
-          <input id="mute" type="checkbox">
-          <span>Mute alarm</span>
-        </label>
-        <div class="button-row two">
-          <button id="testSound" class="ghost-button" type="button">Test Sound</button>
-          <button id="testNotifications" class="ghost-button" type="button">Test Notifications</button>
-        </div>
-        <div class="button-row one">
-          <button id="stopAlarm" class="solid-button secondary" type="button">Stop Alarm</button>
+        <div class="form-grid">
+          <label>
+            Max Attempts
+            <input id="maxAttempts" type="number" min="0" max="20">
+          </label>
+          <label>
+            Base Delay (seconds)
+            <input id="baseDelay" type="number" min="1" max="3600">
+          </label>
+          <label>
+            Refresh Mode
+            <select id="refreshMode">
+              <option value="none">No refresh</option>
+              <option value="soft">Soft refresh</option>
+              <option value="hard">Hard refresh</option>
+            </select>
+          </label>
+          <label class="switch-line">
+            <input id="retryEnabled" type="checkbox">
+            <span>Enable retry engine</span>
+          </label>
         </div>
       </section>
 
-      <details class="accordion">
+      <details class="panel details-panel">
+        <summary>Notifications</summary>
+        <div class="form-grid details-content">
+          <label class="switch-line">
+            <input id="notificationsEnabled" type="checkbox">
+            <span>Desktop notifications</span>
+          </label>
+          <label class="switch-line">
+            <input id="soundEnabled" type="checkbox">
+            <span>Sound alerts</span>
+          </label>
+          <label>
+            Volume
+            <input id="volume" type="range" min="0" max="1" step="0.05">
+          </label>
+        </div>
+        <div class="button-row">
+          <button id="testAlarmBtn" class="btn btn-secondary" type="button">Test Alarm</button>
+          <button id="stopAlarmBtn" class="btn btn-ghost" type="button">Stop Alarm</button>
+        </div>
+      </details>
+
+      <details class="panel details-panel">
         <summary>Advanced Settings</summary>
-        <section class="card advanced-card">
-          <div class="section-heading">
-            <h2>Delay Settings</h2>
-            <span id="delayModeLabel" class="mini-badge">Balanced</span>
-          </div>
-          <div class="segmented" role="group" aria-label="Delay mode">
-            <button data-delay-mode="fast" type="button">Fast</button>
-            <button data-delay-mode="balanced" type="button">Balanced</button>
-            <button data-delay-mode="safe" type="button">Safe</button>
-          </div>
-          <div class="delay-grid">
-            <label for="autofillDelay">
-              Autofill delay
-              <input id="autofillDelay" type="number" min="0" step="50">
-            </label>
-            <label for="signInDelay">
-              Sign-in delay
-              <input id="signInDelay" type="number" min="0" step="50">
-            </label>
-            <label for="retryDelay">
-              Retry buffer
-              <input id="retryDelay" type="number" min="0" step="100">
-            </label>
-            <label for="domWaitDelay">
-              DOM wait
-              <input id="domWaitDelay" type="number" min="100" step="50">
-            </label>
-          </div>
-          <button id="saveDelays" class="ghost-button full" type="button">Save Delay Values</button>
-          <p class="safe-note">
-            Cloudflare is never bypassed. VisaFlowX only detects, focuses, waits for human verification, then continues.
-          </p>
-        </section>
+        <dl class="debug-grid details-content">
+          <div><dt>Active Tab URL</dt><dd id="debugUrl">-</dd></div>
+          <div><dt>Content Status</dt><dd id="debugContent">Unknown</dd></div>
+          <div><dt>Last Message</dt><dd id="debugMessage">-</dd></div>
+          <div><dt>Last Error</dt><dd id="lastError">-</dd></div>
+        </dl>
       </details>
 
-      <details class="accordion debug-accordion">
-        <summary>Developer Debug</summary>
-        <section class="card debug-card" aria-label="Developer debug information">
-          <div class="debug-grid">
-            <div>
-              <span>Active tab URL</span>
-              <strong id="debugActiveTabUrl">Unknown</strong>
-            </div>
-            <div>
-              <span>Injection success</span>
-              <strong id="debugInjectionSuccess">No</strong>
-            </div>
-            <div>
-              <span>Detector state</span>
-              <strong id="debugDetectorState">Unknown</strong>
-            </div>
-            <div>
-              <span>Workflow state</span>
-              <strong id="debugWorkflowState">IDLE</strong>
-            </div>
-            <div>
-              <span>Content script</span>
-              <strong id="debugContentStatus">Not checked</strong>
-            </div>
-            <div>
-              <span>Last runtime message</span>
-              <strong id="debugLastRuntimeMessage">None</strong>
-            </div>
-            <div class="wide">
-              <span>Last error</span>
-              <strong id="debugLastError">None</strong>
-            </div>
-          </div>
-        </section>
-      </details>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Logs</h2>
+          <button id="clearLogsBtn" class="btn btn-small" type="button">Clear</button>
+        </div>
+        <ol id="logs" class="logs"></ol>
+      </section>
     </main>
 
     <script src="../utils/constants.js"></script>
-    <script src="../utils/storage.js"></script>
     <script src="../utils/timers.js"></script>
+    <script src="../utils/parser.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

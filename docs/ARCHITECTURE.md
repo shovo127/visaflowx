@@ -1,26 +1,82 @@
-# VisaFlowX Architecture
+# Architecture
 
-VisaFlowX is a Manifest V3 Chrome extension for compliant IVAC login workflow assistance.
-
-## Runtime Flow
+VisaFlowX Universal is split into isolated MV3 layers.
 
 ```text
-Popup Dashboard
-  -> background/service-worker.js
-      -> validates credentials
-      -> manages schedule and retry chrome.alarms
-      -> injects content scripts when needed
-      -> owns notifications and offscreen alarm audio
-          -> content/automation.js
-              -> centralized AutomationController
-              -> detector/autofill/retry/otp modules
-              -> safe Cloudflare focus/wait handling only
+popup UI
+  -> background service worker
+    -> content bootstrap
+      -> monitor engine
+        -> rule engine
+        -> action runner
+        -> OTP detector
+        -> retry/error recovery
 ```
 
-## Scheduler
+## Background
 
-The popup stores a future date/time through the background service worker. The background creates a `visaflowx-scheduled-start` Chrome alarm. When the alarm fires, VisaFlowX opens or focuses `https://appointment.ivacbd.com/signin`, waits for the tab to load, injects content scripts if needed, and starts the normal automation workflow.
+`background/service-worker.js`
 
-## Compliance Boundary
+- Owns storage state.
+- Injects content scripts with `chrome.scripting.executeScript`.
+- Handles schedules through `chrome.alarms`.
+- Sends notifications.
+- Tracks active status, logs, active profile, and tab lifecycle.
 
-VisaFlowX never bypasses Cloudflare, injects verification tokens, uses solver APIs, or automates challenge completion. It only detects the widget, highlights/focuses it, waits for successful human verification, then continues the normal login workflow.
+## Content
+
+`content/bootstrap.js`
+
+- Receives runtime messages.
+- Starts and stops monitoring.
+- Runs the area selector.
+- Plays and stops test alarm sounds.
+
+`content/monitor.js`
+
+- Uses `MutationObserver`.
+- Debounces expensive DOM evaluation.
+- Stops automation on OTP pages and triggers manual handoff alerts.
+- Detects retry text and page error text.
+- Runs matched rules.
+- Cleans observers and timers on stop.
+
+`content/otp-detector.js`
+
+- Detects common OTP and verification-code inputs.
+- Focuses and highlights the OTP input when present.
+- Does not read or enter OTP data.
+
+## Rules
+
+`rules/rule-engine.js`
+
+- Evaluates conditions against current URL, visible text, selectors, button state, error state, and protected verification state.
+
+`rules/action-runner.js`
+
+- Executes safe actions.
+- Blocks actions targeting protected challenge widgets.
+- Supports click, focus, fill, back, reload, open URL, wait for selector/text, and scroll/highlight.
+
+## Popup
+
+`popup/popup.html`, `popup/popup.css`, `popup/popup.js`
+
+- Provides a compact professional dashboard.
+- Creates profiles, rules, schedules, retry settings, and notification settings.
+- Renders live status from runtime messages and storage.
+
+## Storage
+
+Chrome Storage Local stores:
+
+- Profiles
+- Rules
+- Retry settings
+- Schedules
+- App settings
+- Logs
+- Runtime status
+
+Sensitive field names are masked in logs.

@@ -1,177 +1,183 @@
-"use strict";
+(function initDomUtils(global) {
+  "use strict";
 
-window.VisaFlowXDom = (() => {
-  function isElement(value) {
-    return value && value.nodeType === Node.ELEMENT_NODE;
+  const Constants = global.VisaFlowXUniversal?.Constants || requireMaybe("../utils/constants.js");
+  const Parser = global.VisaFlowXUniversal?.Parser || requireMaybe("../utils/parser.js");
+
+  function requireMaybe(path) {
+    try {
+      return typeof require !== "undefined" ? require(path) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function safeQuery(selector, root = document) {
+    if (!selector || !root?.querySelector) return null;
+    try {
+      return root.querySelector(selector);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function safeQueryAll(selector, root = document) {
+    if (!selector || !root?.querySelectorAll) return [];
+    try {
+      return Array.from(root.querySelectorAll(selector));
+    } catch (_) {
+      return [];
+    }
   }
 
   function isVisible(element) {
-    if (!isElement(element)) {
-      return false;
-    }
-    const style = window.getComputedStyle(element);
+    if (!element || !element.getBoundingClientRect) return false;
     const rect = element.getBoundingClientRect();
-    return (
-      style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      Number(style.opacity) !== 0 &&
-      rect.width > 0 &&
-      rect.height > 0
-    );
+    const style = global.getComputedStyle ? global.getComputedStyle(element) : null;
+    return rect.width > 0 && rect.height > 0 && (!style || (style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity || 1) !== 0));
   }
 
-  function getText(element) {
-    return String((element && (element.innerText || element.textContent)) || "").trim();
-  }
-
-  function normalizeText(text) {
-    return String(text || "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase();
-  }
-
-  function findVisible(selectors, root = document) {
-    const list = Array.isArray(selectors) ? selectors : [selectors];
-    for (const selector of list) {
-      const elements = Array.from(root.querySelectorAll(selector));
-      const match = elements.find(isVisible);
-      if (match) {
-        return match;
+  function visibleText(root = document.body) {
+    if (!root) return "";
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent || !isVisible(parent)) return NodeFilter.FILTER_REJECT;
+        const tag = parent.tagName?.toLowerCase();
+        if (["script", "style", "noscript", "template"].includes(tag)) return NodeFilter.FILTER_REJECT;
+        return node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       }
+    });
+
+    const chunks = [];
+    let node = walker.nextNode();
+    while (node && chunks.join(" ").length < 20000) {
+      chunks.push(node.nodeValue.trim());
+      node = walker.nextNode();
     }
-    return null;
+    return Parser?.normalizeText ? Parser.normalizeText(chunks.join(" ")) : chunks.join(" ").replace(/\s+/g, " ").trim();
   }
 
-  function findByText(selectors, matcher, root = document) {
-    const list = Array.isArray(selectors) ? selectors : [selectors];
-    const elements = list.flatMap((selector) => Array.from(root.querySelectorAll(selector)));
-    return elements.find((element) => {
-      if (!isVisible(element)) {
-        return false;
-      }
-      const text = normalizeText(getText(element) || element.value || element.getAttribute("aria-label"));
-      return typeof matcher === "function" ? matcher(text, element) : matcher.test(text);
+  function findByText(text, selector = "button, a, input, textarea, select, [role='button'], [tabindex]", root = document) {
+    const candidates = safeQueryAll(selector, root).filter(isVisible);
+    return candidates.find((element) => {
+      const value = element.value || element.innerText || element.textContent || element.getAttribute("aria-label") || element.getAttribute("title") || "";
+      return Parser?.textMatches ? Parser.textMatches(value, text, false) : String(value).toLowerCase().includes(String(text).toLowerCase());
     }) || null;
   }
 
-  function setNativeValue(input, value) {
-    if (!input) {
-      return false;
-    }
-    const prototype = Object.getPrototypeOf(input);
-    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
-    if (descriptor && descriptor.set) {
-      descriptor.set.call(input, value);
-    } else {
-      input.value = value;
-    }
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    return true;
+  function cssEscape(value) {
+    if (global.CSS?.escape) return global.CSS.escape(value);
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
   }
 
-  function ensureStyle(styleId, cssText) {
-    let style = document.getElementById(styleId);
-    if (!style) {
-      style = document.createElement("style");
-      style.id = styleId;
-      style.textContent = cssText;
-      document.documentElement.appendChild(style);
+  function buildUniqueSelector(element) {
+    if (!element || !element.tagName) return "";
+    if (element.id) return `#${cssEscape(element.id)}`;
+
+    const parts = [];
+    let node = element;
+    while (node && node.nodeType === Node.ELEMENT_NODE && parts.length < 5) {
+      const tag = node.tagName.toLowerCase();
+      const name = node.getAttribute("name");
+      const dataId = node.getAttribute("data-testid") || node.getAttribute("data-test") || node.getAttribute("data-qa");
+      let part = tag;
+      if (dataId) part += `[data-testid="${cssEscape(dataId)}"]`;
+      else if (name) part += `[name="${cssEscape(name)}"]`;
+      else {
+        const classes = Array.from(node.classList || []).slice(0, 2).map(cssEscape);
+        if (classes.length) part += `.${classes.join(".")}`;
+      }
+      const parent = node.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children).filter((item) => item.tagName === node.tagName);
+        if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      const candidate = parts.join(" > ");
+      if (safeQueryAll(candidate).length === 1) return candidate;
+      node = parent;
     }
-    return style;
+    return parts.join(" > ");
   }
 
-  function highlight(element, className, label) {
-    if (!isElement(element)) {
-      return;
-    }
+  function matchesAny(element, selectors = []) {
+    if (!element?.matches) return false;
+    return selectors.some((selector) => {
+      try {
+        return element.matches(selector) || Boolean(element.closest(selector));
+      } catch (_) {
+        return false;
+      }
+    });
+  }
 
-    ensureStyle(
-      "visaflowx-highlight-style",
-      `
-      .visaflowx-captcha-focus {
-        outline: 4px solid #22c55e !important;
-        outline-offset: 8px !important;
-        box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.25), 0 0 36px rgba(34, 197, 94, 0.65) !important;
-        border-radius: 12px !important;
-        position: relative !important;
-        z-index: 2147483646 !important;
+  function detectProtectedChallenge(root = document) {
+    const selectors = Constants?.PROTECTED_CHALLENGE_SELECTORS || [];
+    for (const selector of selectors) {
+      const element = safeQuery(selector, root);
+      if (element && isVisible(element)) {
+        return {
+          present: true,
+          selector,
+          element,
+          description: "Protected verification widget detected"
+        };
       }
-      .visaflowx-otp-focus {
-        outline: 4px solid #f59e0b !important;
-        outline-offset: 6px !important;
-        box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.25), 0 0 36px rgba(245, 158, 11, 0.65) !important;
-        border-radius: 12px !important;
-      }
-      .visaflowx-floating-label {
-        position: fixed !important;
-        left: 50% !important;
-        top: 20px !important;
-        transform: translateX(-50%) !important;
-        background: #0f172a !important;
-        color: #f8fafc !important;
-        padding: 12px 16px !important;
-        border: 1px solid rgba(255,255,255,0.18) !important;
-        border-radius: 12px !important;
-        box-shadow: 0 18px 60px rgba(0,0,0,0.35) !important;
-        font-family: Arial, sans-serif !important;
-        font-size: 14px !important;
-        line-height: 1.4 !important;
-        z-index: 2147483647 !important;
-      }
-      `
-    );
-
-    element.classList.add(className);
-    if (label) {
-      let labelNode = document.getElementById("visaflowx-floating-label");
-      if (!labelNode) {
-        labelNode = document.createElement("div");
-        labelNode.id = "visaflowx-floating-label";
-        labelNode.className = "visaflowx-floating-label";
-        document.body.appendChild(labelNode);
-      }
-      labelNode.textContent = label;
     }
+    return { present: false, selector: "", element: null, description: "" };
+  }
+
+  function highlightElement(element, kind = "primary") {
+    if (!element || !element.style) return;
+    const color = kind === "danger" ? "#ff5c7a" : kind === "success" ? "#31d0aa" : "#59a6ff";
     element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-    if (!element.hasAttribute("tabindex")) {
-      element.setAttribute("tabindex", "-1");
-    }
-    element.focus({ preventScroll: true });
+    element.style.outline = `3px solid ${color}`;
+    element.style.outlineOffset = "4px";
+    element.style.boxShadow = `0 0 0 8px color-mix(in srgb, ${color} 28%, transparent)`;
+    element.setAttribute("data-visaflowx-highlighted", "true");
+    setTimeout(() => {
+      if (element.getAttribute("data-visaflowx-highlighted") === "true") {
+        element.style.outline = "";
+        element.style.outlineOffset = "";
+        element.style.boxShadow = "";
+        element.removeAttribute("data-visaflowx-highlighted");
+      }
+    }, 12000);
   }
 
-  function clearFloatingLabel() {
-    const label = document.getElementById("visaflowx-floating-label");
-    if (label) {
-      label.remove();
-    }
+  function elementSummary(element) {
+    if (!element) return null;
+    const rect = element.getBoundingClientRect ? element.getBoundingClientRect() : { x: 0, y: 0, width: 0, height: 0 };
+    return {
+      selector: buildUniqueSelector(element),
+      tag: element.tagName?.toLowerCase() || "",
+      text: Parser?.normalizeText ? Parser.normalizeText((element.innerText || element.value || "").slice(0, 120)) : "",
+      rect: {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      }
+    };
   }
 
-  function clickElement(element) {
-    if (!isElement(element) || !isVisible(element)) {
-      return false;
-    }
-    if (element.disabled || element.getAttribute("aria-disabled") === "true") {
-      return false;
-    }
-    element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-    element.focus({ preventScroll: true });
-    element.click();
-    return true;
-  }
-
-  return {
-    isElement,
-    isVisible,
-    getText,
-    normalizeText,
-    findVisible,
+  const DomUtils = Object.freeze({
+    buildUniqueSelector,
+    detectProtectedChallenge,
+    elementSummary,
     findByText,
-    setNativeValue,
-    ensureStyle,
-    highlight,
-    clearFloatingLabel,
-    clickElement
-  };
-})();
+    highlightElement,
+    isVisible,
+    matchesAny,
+    safeQuery,
+    safeQueryAll,
+    visibleText
+  });
+
+  global.VisaFlowXUniversal = Object.assign(global.VisaFlowXUniversal || {}, { DomUtils });
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = DomUtils;
+  }
+})(typeof globalThis !== "undefined" ? globalThis : this);

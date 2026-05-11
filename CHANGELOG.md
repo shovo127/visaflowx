@@ -1,30 +1,22 @@
 # Changelog
 
-## 1.2.0
+## 1.0.1 - 2026-05-11
 
-- Added Scheduler card with date/time scheduling, next-run display, countdown, Schedule Run, and Clear Schedule.
-- Added `chrome.alarms` scheduled start flow that opens or focuses the IVAC sign-in page and starts automation.
-- Added scheduled-run desktop notification and schedule restoration on browser startup.
-- Added auto-stop when the active automation tab is closed.
-- Added docs for architecture and testing.
+- Promoted VisaFlowX Universal to the root loadable extension folder.
+- Added explicit OTP manual-handoff detection, focus, alarm, and notification handling.
+- Added IVAC, Goethe, University Portal, Booking System, and Custom default profiles.
+- Expanded popup dashboard sections and live status metrics for monitored text and last action.
+- Added root-level universal test coverage for manifest, safety, OTP handling, profiles, and popup sections.
 
-## 1.1.0
+## 1.0.0 - 2026-05-11
 
-- Redesigned popup around a clear Start Automation workflow.
-- Added animated visual workflow stages and action-required status text.
-- Added centralized `AutomationController` state machine.
-- Added explicit startup safety so automation does not begin without user action after browser startup.
-- Added content-script reinjection from the Start flow when needed.
-- Added Test Autofill control.
-- Improved live monitor, retry timer, notification, and advanced settings UX.
-- Added architecture documentation and stronger static checks.
-
-## 1.0.0
-
-- Initial VisaFlowX Manifest V3 extension.
-- Added credential autofill for IVAC login.
-- Added compliant Cloudflare Turnstile focus/wait handling.
-- Added automatic Sign In click after verification detection.
-- Added OTP page detection, visual highlight, notification, and looping alarm.
-- Added retry countdown parsing and automatic retry scheduling.
-- Added dark popup dashboard and controls.
+- Initial production-ready VisaFlowX Universal release.
+- Added universal profile system.
+- Added MutationObserver monitoring engine.
+- Added conditional rule engine and safe action runner.
+- Added protected verification wait-only guard.
+- Added retry engine with cooldown text parsing and backoff.
+- Added schedule system using `chrome.alarms`.
+- Added visual area selector.
+- Added professional dark popup dashboard.
+- Added docs, tests, MIT license, and GitHub-ready structure.

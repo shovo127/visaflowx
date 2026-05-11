@@ -1,54 +1,35 @@
-"use strict";
+(function initNotificationHandler(global) {
+  "use strict";
 
-window.VisaFlowXNotify = (() => {
-  let lastNotificationAt = {};
+  let audio = null;
 
-  async function sendRuntimeMessage(message) {
-    try {
-      return await chrome.runtime.sendMessage(message);
-    } catch (error) {
-      window.VisaFlowXLogger.warn("runtime-message-failed", {
-        type: message && message.type,
-        error: error && error.message
-      });
-      return null;
-    }
+  function getAlarmUrl() {
+    if (global.chrome?.runtime?.getURL) return chrome.runtime.getURL("assets/sounds/alarm.wav");
+    return "";
   }
 
-  async function status(patch) {
-    await sendRuntimeMessage({
-      type: "STATUS_UPDATE",
-      status: patch
-    });
+  async function playAlarm({ loop = true, volume = 0.9 } = {}) {
+    stopAlarm();
+    const url = getAlarmUrl();
+    if (!url) return { ok: false, error: "Alarm URL unavailable" };
+    audio = new Audio(url);
+    audio.loop = loop;
+    audio.volume = Math.max(0, Math.min(1, Number(volume)));
+    await audio.play();
+    return { ok: true };
   }
 
-  async function notification(id, title, message, minGapMs = 5000) {
-    const now = Date.now();
-    if (lastNotificationAt[id] && now - lastNotificationAt[id] < minGapMs) {
-      return;
-    }
-    lastNotificationAt[id] = now;
-    await sendRuntimeMessage({
-      type: "SHOW_NOTIFICATION",
-      id,
-      title,
-      message
-    });
+  function stopAlarm() {
+    if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
+    audio = null;
   }
 
-  async function playAlarm() {
-    await sendRuntimeMessage({ type: "PLAY_ALARM" });
+  function setVolume(volume) {
+    if (audio) audio.volume = Math.max(0, Math.min(1, Number(volume)));
   }
 
-  async function stopAlarm() {
-    await sendRuntimeMessage({ type: "STOP_ALARM" });
-  }
-
-  return {
-    sendRuntimeMessage,
-    status,
-    notification,
-    playAlarm,
-    stopAlarm
-  };
-})();
+  const NotificationHandler = Object.freeze({ playAlarm, setVolume, stopAlarm });
+  global.VisaFlowXUniversal = Object.assign(global.VisaFlowXUniversal || {}, { NotificationHandler });
+})(typeof globalThis !== "undefined" ? globalThis : this);

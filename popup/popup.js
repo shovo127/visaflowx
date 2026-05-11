@@ -1,529 +1,333 @@
-"use strict";
+(function initPopup(global) {
+  "use strict";
 
-const constants = window.VisaFlowXConstants || {};
-const WORKFLOW_STATES = constants.WORKFLOW_STATES || {};
-const STATE_LABELS = constants.STATE_LABELS || {};
-const WORKFLOW_STAGES = constants.WORKFLOW_STAGES || [];
+  const { Constants, Timers } = global.VisaFlowXUniversal;
+  const { ACTIONS, CONDITIONS, MESSAGE, REFRESH_MODES, STATE } = Constants;
 
-const ui = {
-  automationBadge: document.getElementById("automationBadge"),
-  primaryStatusText: document.getElementById("primaryStatusText"),
-  startAutomation: document.getElementById("startAutomation"),
-  stopAutomation: document.getElementById("stopAutomation"),
-  workflowStages: document.getElementById("workflowStages"),
-  actionRequired: document.getElementById("actionRequired"),
-  credentialBadge: document.getElementById("credentialBadge"),
-  contactNumber: document.getElementById("contactNumber"),
-  password: document.getElementById("password"),
-  saveCredentials: document.getElementById("saveCredentials"),
-  testAutofill: document.getElementById("testAutofill"),
-  deleteCredentials: document.getElementById("deleteCredentials"),
-  currentPage: document.getElementById("currentPage"),
-  statusState: document.getElementById("statusState"),
-  captchaState: document.getElementById("captchaState"),
-  otpState: document.getElementById("otpState"),
-  lastAttempt: document.getElementById("lastAttempt"),
-  lastMessage: document.getElementById("lastMessage"),
-  lastError: document.getElementById("lastError"),
-  testDetection: document.getElementById("testDetection"),
-  timerStatus: document.getElementById("timerStatus"),
-  retryEndsAt: document.getElementById("retryEndsAt"),
-  resetTimers: document.getElementById("resetTimers"),
-  notificationState: document.getElementById("notificationState"),
-  volume: document.getElementById("volume"),
-  mute: document.getElementById("mute"),
-  testSound: document.getElementById("testSound"),
-  testNotifications: document.getElementById("testNotifications"),
-  stopAlarm: document.getElementById("stopAlarm"),
-  scheduleBadge: document.getElementById("scheduleBadge"),
-  scheduleDate: document.getElementById("scheduleDate"),
-  scheduleTime: document.getElementById("scheduleTime"),
-  scheduleCountdown: document.getElementById("scheduleCountdown"),
-  nextScheduledRun: document.getElementById("nextScheduledRun"),
-  scheduleRun: document.getElementById("scheduleRun"),
-  clearSchedule: document.getElementById("clearSchedule"),
-  delayModeLabel: document.getElementById("delayModeLabel"),
-  autofillDelay: document.getElementById("autofillDelay"),
-  signInDelay: document.getElementById("signInDelay"),
-  retryDelay: document.getElementById("retryDelay"),
-  domWaitDelay: document.getElementById("domWaitDelay"),
-  saveDelays: document.getElementById("saveDelays"),
-  debugActiveTabUrl: document.getElementById("debugActiveTabUrl"),
-  debugInjectionSuccess: document.getElementById("debugInjectionSuccess"),
-  debugDetectorState: document.getElementById("debugDetectorState"),
-  debugWorkflowState: document.getElementById("debugWorkflowState"),
-  debugContentStatus: document.getElementById("debugContentStatus"),
-  debugLastRuntimeMessage: document.getElementById("debugLastRuntimeMessage"),
-  debugLastError: document.getElementById("debugLastError")
-};
-
-let latestStatus = null;
-let latestSettings = null;
-let latestScheduleState = null;
-let countdownTimer = null;
-
-function titleCase(value) {
-  return String(value || "")
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function formatTime(value) {
-  if (!value) {
-    return "Never";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Never";
-  }
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  });
-}
-
-function formatDateTimeLocal(timestamp) {
-  if (!timestamp) {
-    return "none";
-  }
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) {
-    return "none";
-  }
-  return date.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
-
-function formatInputDate(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function normalizeState(status = {}) {
-  if (status.workflowState) {
-    return status.workflowState;
-  }
-
-  const labelToState = Object.entries(STATE_LABELS).find(([, label]) => label === status.state);
-  return labelToState ? labelToState[0] : WORKFLOW_STATES.IDLE || "IDLE";
-}
-
-function runtimeMessage(message) {
-  return chrome.runtime.sendMessage(message).catch((error) => ({
-    ok: false,
-    error: error && error.message ? error.message : "Runtime message failed"
-  }));
-}
-
-function setTemporaryMessage(message) {
-  ui.primaryStatusText.textContent = message;
-  ui.lastMessage.textContent = message;
-}
-
-function buildWorkflowStages() {
-  ui.workflowStages.textContent = "";
-  WORKFLOW_STAGES.forEach((stage, index) => {
-    const item = document.createElement("li");
-    item.className = "workflow-step";
-    item.dataset.stageId = stage.id;
-
-    const dot = document.createElement("span");
-    dot.className = "workflow-dot";
-    dot.textContent = String(index + 1);
-
-    const label = document.createElement("span");
-    label.textContent = stage.label;
-
-    const state = document.createElement("em");
-    state.className = "workflow-state";
-    state.textContent = "Waiting";
-
-    item.append(dot, label, state);
-    ui.workflowStages.appendChild(item);
-  });
-}
-
-function setWorkflowState(status) {
-  const currentState = normalizeState(status);
-  const stageIndex = WORKFLOW_STAGES.findIndex((stage) => stage.states.includes(currentState));
-
-  Array.from(ui.workflowStages.children).forEach((item, index) => {
-    item.classList.remove("active", "done");
-    const stateLabel = item.querySelector(".workflow-state");
-    if (stageIndex >= 0 && index < stageIndex) {
-      item.classList.add("done");
-      stateLabel.textContent = "Done";
-      return;
-    }
-    if (stageIndex >= 0 && index === stageIndex) {
-      item.classList.add("active");
-      stateLabel.textContent = "Active";
-      return;
-    }
-    stateLabel.textContent = "Waiting";
-  });
-}
-
-function setBadge(status, settings) {
-  const state = normalizeState(status);
-  ui.automationBadge.classList.remove("running", "alert", "error");
-
-  if (state === WORKFLOW_STATES.ERROR) {
-    ui.automationBadge.textContent = "Error";
-    ui.automationBadge.classList.add("error");
-    return;
-  }
-
-  if (state === WORKFLOW_STATES.OTP_DETECTED || status.otpDetected) {
-    ui.automationBadge.textContent = "OTP";
-    ui.automationBadge.classList.add("alert");
-    return;
-  }
-
-  if (settings.automationEnabled || status.automationEnabled) {
-    ui.automationBadge.textContent = "Running";
-    ui.automationBadge.classList.add("running");
-    return;
-  }
-
-  ui.automationBadge.textContent = "Idle";
-}
-
-function renderStartButton(status, settings) {
-  const isRunning = Boolean(settings.automationEnabled || status.automationEnabled);
-  ui.startAutomation.classList.toggle("running", isRunning);
-  ui.startAutomation.disabled = isRunning;
-  ui.startAutomation.querySelector("span").textContent = isRunning ? "Running" : "Start Automation";
-  ui.stopAutomation.disabled = !isRunning && normalizeState(status) !== WORKFLOW_STATES.OTP_DETECTED;
-}
-
-function renderCredentials(credentials) {
-  const saved = Boolean(credentials.contactNumber && credentials.password);
-  ui.credentialBadge.textContent = saved ? "Credentials saved securely" : "Not saved";
-  ui.credentialBadge.classList.toggle("saved", saved);
-  ui.contactNumber.value = credentials.contactNumber || "";
-  ui.password.value = credentials.password || "";
-}
-
-function renderSettings(settings) {
-  latestSettings = settings;
-  const mode = settings.delayMode || "balanced";
-  const delays = (settings.delays && settings.delays[mode]) || {};
-
-  ui.delayModeLabel.textContent = titleCase(mode);
-  document.querySelectorAll("[data-delay-mode]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.delayMode === mode);
-  });
-
-  ui.autofillDelay.value = delays.autofill ?? "";
-  ui.signInDelay.value = delays.signIn ?? "";
-  ui.retryDelay.value = delays.retryBuffer ?? "";
-  ui.domWaitDelay.value = delays.domWait ?? "";
-  ui.volume.value = String(Math.round(((settings.sound && settings.sound.volume) ?? 1) * 100));
-  ui.mute.checked = Boolean(settings.sound && settings.sound.muted);
-}
-
-function renderSchedule(scheduleState, status) {
-  latestScheduleState = scheduleState || {
-    enabled: false,
-    scheduledAt: null
+  const $ = (id) => document.getElementById(id);
+  const elements = {
+    actionType: $("actionType"),
+    activeSite: $("activeSite"),
+    baseDelay: $("baseDelay"),
+    clearLogsBtn: $("clearLogsBtn"),
+    clearScheduleBtn: $("clearScheduleBtn"),
+    conditionText: $("conditionText"),
+    conditionType: $("conditionType"),
+    currentRule: $("currentRule"),
+    debugContent: $("debugContent"),
+    debugMessage: $("debugMessage"),
+    debugUrl: $("debugUrl"),
+    deleteProfileBtn: $("deleteProfileBtn"),
+    lastActionMetric: $("lastActionMetric"),
+    lastError: $("lastError"),
+    logs: $("logs"),
+    maxAttempts: $("maxAttempts"),
+    monitoredText: $("monitoredText"),
+    notificationsEnabled: $("notificationsEnabled"),
+    profileName: $("profileName"),
+    profileSelect: $("profileSelect"),
+    refreshMode: $("refreshMode"),
+    retryEnabled: $("retryEnabled"),
+    retryModeBadge: $("retryModeBadge"),
+    retryTimer: $("retryTimer"),
+    ruleCount: $("ruleCount"),
+    ruleList: $("ruleList"),
+    runRuleBtn: $("runRuleBtn"),
+    saveProfileBtn: $("saveProfileBtn"),
+    saveRuleBtn: $("saveRuleBtn"),
+    scheduleBadge: $("scheduleBadge"),
+    scheduleBtn: $("scheduleBtn"),
+    scheduleDateTime: $("scheduleDateTime"),
+    scheduleRecurring: $("scheduleRecurring"),
+    selectAreaBtn: $("selectAreaBtn"),
+    soundEnabled: $("soundEnabled"),
+    startBtn: $("startBtn"),
+    startUrl: $("startUrl"),
+    stateBadge: $("stateBadge"),
+    statusText: $("statusText"),
+    stopAlarmBtn: $("stopAlarmBtn"),
+    stopBtn: $("stopBtn"),
+    targetSelector: $("targetSelector"),
+    targetText: $("targetText"),
+    testAlarmBtn: $("testAlarmBtn"),
+    testNotificationBtn: $("testNotificationBtn"),
+    urlPatterns: $("urlPatterns"),
+    volume: $("volume"),
+    workflowStage: $("workflowStage")
   };
 
-  const enabled = Boolean(latestScheduleState.enabled && latestScheduleState.scheduledAt);
-  ui.scheduleBadge.textContent = enabled ? "Enabled" : "Disabled";
-  ui.scheduleBadge.classList.toggle("saved", enabled);
-  ui.nextScheduledRun.textContent = enabled
-    ? `Next scheduled run: ${formatDateTimeLocal(latestScheduleState.scheduledAt)}`
-    : "Next scheduled run: none";
-  ui.scheduleCountdown.textContent = enabled
-    ? window.VisaFlowXTimers.formatRemaining(latestScheduleState.scheduledAt - Date.now())
-    : "No schedule";
+  let appState = null;
+  let countdownTimer = null;
 
-  if (enabled && !ui.scheduleDate.value && !ui.scheduleTime.value) {
-    const date = new Date(latestScheduleState.scheduledAt);
-    ui.scheduleDate.value = formatInputDate(date);
-    ui.scheduleTime.value = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-  }
-
-  if (status.scheduleEnabled && status.scheduledAt) {
-    ui.scheduleBadge.textContent = "Enabled";
-    ui.scheduleBadge.classList.add("saved");
-  }
-}
-
-function renderStatus(status, settings) {
-  latestStatus = status;
-  latestSettings = settings;
-  const state = normalizeState(status);
-  const stateLabel = STATE_LABELS[state] || status.state || "Idle";
-  const running = Boolean(settings.automationEnabled || status.automationEnabled);
-
-  ui.primaryStatusText.textContent = status.actionRequired || (running ? "Automation is running." : "Ready to automate IVAC login workflow.");
-  ui.actionRequired.textContent = status.actionRequired || "Press Start Automation when ready.";
-  ui.currentPage.textContent = status.currentPage || "Unknown";
-  ui.statusState.textContent = stateLabel;
-  ui.captchaState.textContent = status.captchaState || "Unknown";
-  ui.otpState.textContent = status.otpDetected ? "Detected" : "No";
-  ui.lastAttempt.textContent = status.lastLoginAttempt ? formatTime(status.lastLoginAttempt) : "Never";
-  ui.lastMessage.textContent = status.lastMessage || "Ready";
-  ui.lastError.textContent = status.lastError || "None";
-  ui.notificationState.textContent = status.otpDetected ? "Alarm active" : "Ready";
-
-  setBadge(status, settings);
-  renderStartButton(status, settings);
-  setWorkflowState(status);
-  renderDebug(status);
-  updateCountdown();
-}
-
-function renderDebug(status) {
-  const debug = status.debug || {};
-  ui.debugActiveTabUrl.textContent = debug.activeTabUrl || "Unknown";
-  ui.debugInjectionSuccess.textContent = debug.injectionSuccess ? "Yes" : "No";
-  ui.debugDetectorState.textContent = debug.detectorState || status.currentPage || "Unknown";
-  ui.debugWorkflowState.textContent = debug.workflowState || normalizeState(status);
-  ui.debugContentStatus.textContent = debug.contentScriptStatus || "Not checked";
-  ui.debugLastRuntimeMessage.textContent = debug.lastRuntimeMessage || "None";
-  ui.debugLastError.textContent = debug.lastError || status.lastError || "None";
-}
-
-function updateCountdown() {
-  updateScheduleCountdown();
-
-  if (!latestStatus || !latestStatus.retryEndsAt) {
-    ui.timerStatus.textContent = latestStatus && latestStatus.timerStatus ? latestStatus.timerStatus : "None";
-    ui.retryEndsAt.textContent = "No retry scheduled";
-    return;
-  }
-
-  const remaining = latestStatus.retryEndsAt - Date.now();
-  if (remaining <= 0) {
-    ui.timerStatus.textContent = "Retry ready";
-    ui.retryEndsAt.textContent = "Retry should start now";
-    return;
-  }
-
-  ui.timerStatus.textContent = window.VisaFlowXTimers.formatRemaining(remaining);
-  ui.retryEndsAt.textContent = `Ends at ${formatTime(latestStatus.retryEndsAt)}`;
-}
-
-function updateScheduleCountdown() {
-  if (!latestScheduleState || !latestScheduleState.enabled || !latestScheduleState.scheduledAt) {
-    if (ui.scheduleCountdown) {
-      ui.scheduleCountdown.textContent = "No schedule";
-    }
-    return;
-  }
-
-  const remaining = latestScheduleState.scheduledAt - Date.now();
-  ui.scheduleCountdown.textContent = remaining > 0
-    ? window.VisaFlowXTimers.formatRemaining(remaining)
-    : "Starting now";
-}
-
-async function refresh() {
-  const credentials = await window.VisaFlowXStorage.getCredentials();
-  const state = await runtimeMessage({ type: "GET_STATE" });
-  const settings = state && state.settings ? state.settings : await window.VisaFlowXStorage.getSettings();
-  const status = state && state.status ? state.status : await window.VisaFlowXStorage.getStatus();
-  const scheduleState = state && state.scheduleState ? state.scheduleState : {
-    enabled: false,
-    scheduledAt: null
-  };
-
-  renderCredentials(credentials);
-  renderSettings(settings);
-  renderSchedule(scheduleState, status);
-  renderStatus(status, settings);
-}
-
-async function saveCredentials() {
-  const credentials = {
-    contactNumber: ui.contactNumber.value,
-    password: ui.password.value
-  };
-  if (!credentials.contactNumber.trim() || !credentials.password) {
-    setTemporaryMessage("Enter contact number and password before saving.");
-    return;
-  }
-
-  await window.VisaFlowXStorage.saveCredentials(credentials);
-  setTemporaryMessage("Credentials saved securely.");
-  await refresh();
-}
-
-async function deleteCredentials() {
-  await window.VisaFlowXStorage.deleteCredentials();
-  setTemporaryMessage("Credentials deleted.");
-  await refresh();
-}
-
-async function setAutomation(enabled) {
-  if (enabled) {
-    const credentials = await window.VisaFlowXStorage.getCredentials();
-    if (!credentials.contactNumber || !credentials.password) {
-      setTemporaryMessage("Save credentials before starting automation.");
-      return;
-    }
-  }
-
-  const response = await runtimeMessage({ type: enabled ? "START_AUTOMATION" : "STOP_AUTOMATION" });
-  if (!response || response.ok === false) {
-    setTemporaryMessage(response && response.error ? response.error : "Could not update automation.");
-  }
-  await refresh();
-}
-
-async function commandActiveTab(type) {
-  const response = await runtimeMessage({ type });
-  if (!response || response.ok === false) {
-    setTemporaryMessage(response && response.error ? response.error : "Open the IVAC tab and try again.");
-  }
-  await refresh();
-}
-
-function getScheduledTimestamp() {
-  if (!ui.scheduleDate.value || !ui.scheduleTime.value) {
-    return null;
-  }
-  const scheduled = new Date(`${ui.scheduleDate.value}T${ui.scheduleTime.value}:00`);
-  const timestamp = scheduled.getTime();
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-async function scheduleRun() {
-  const scheduledAt = getScheduledTimestamp();
-  if (!scheduledAt || scheduledAt <= Date.now()) {
-    setTemporaryMessage("Choose a future date and time before scheduling.");
-    return;
-  }
-
-  const response = await runtimeMessage({
-    type: "SCHEDULE_RUN",
-    scheduledAt
-  });
-  if (!response || response.ok === false) {
-    setTemporaryMessage(response && response.error ? response.error : "Could not schedule run.");
-  } else {
-    setTemporaryMessage("Scheduled run saved.");
-  }
-  await refresh();
-}
-
-async function clearSchedule() {
-  const response = await runtimeMessage({ type: "CLEAR_SCHEDULE" });
-  if (!response || response.ok === false) {
-    setTemporaryMessage(response && response.error ? response.error : "Could not clear schedule.");
-  } else {
-    ui.scheduleDate.value = "";
-    ui.scheduleTime.value = "";
-    setTemporaryMessage("Schedule cleared.");
-  }
-  await refresh();
-}
-
-async function setDelayMode(mode) {
-  const settings = await window.VisaFlowXStorage.saveSettings({ delayMode: mode });
-  await runtimeMessage({
-    type: "SAVE_SETTINGS",
-    settings: {
-      delayMode: mode
-    }
-  });
-  renderSettings(settings);
-}
-
-async function saveDelayValues() {
-  const mode = latestSettings && latestSettings.delayMode ? latestSettings.delayMode : "balanced";
-  const delays = {
-    [mode]: {
-      autofill: Math.max(0, Number(ui.autofillDelay.value) || 0),
-      signIn: Math.max(0, Number(ui.signInDelay.value) || 0),
-      retryBuffer: Math.max(0, Number(ui.retryDelay.value) || 0),
-      domWait: Math.max(100, Number(ui.domWaitDelay.value) || 100)
-    }
-  };
-
-  const settings = await window.VisaFlowXStorage.saveSettings({ delays });
-  await runtimeMessage({
-    type: "SAVE_SETTINGS",
-    settings: {
-      delays
-    }
-  });
-  renderSettings(settings);
-  setTemporaryMessage(`${titleCase(mode)} delay values saved.`);
-}
-
-async function updateSound() {
-  const sound = {
-    volume: Number(ui.volume.value) / 100,
-    muted: ui.mute.checked
-  };
-  const settings = await window.VisaFlowXStorage.saveSettings({ sound });
-  await runtimeMessage({ type: "UPDATE_SOUND", sound });
-  renderSettings(settings);
-}
-
-function bindEvents() {
-  ui.startAutomation.addEventListener("click", () => setAutomation(true));
-  ui.stopAutomation.addEventListener("click", () => setAutomation(false));
-  ui.saveCredentials.addEventListener("click", saveCredentials);
-  ui.deleteCredentials.addEventListener("click", deleteCredentials);
-  ui.testAutofill.addEventListener("click", () => commandActiveTab("TEST_AUTOFILL"));
-  ui.testDetection.addEventListener("click", () => commandActiveTab("TEST_DETECTION"));
-  ui.resetTimers.addEventListener("click", async () => {
-    await runtimeMessage({ type: "CANCEL_RETRY" });
-    await refresh();
-  });
-  ui.volume.addEventListener("input", updateSound);
-  ui.mute.addEventListener("change", updateSound);
-  ui.testSound.addEventListener("click", async () => {
-    await updateSound();
-    await runtimeMessage({
-      type: "TEST_ALARM",
-      sound: {
-        volume: Number(ui.volume.value) / 100,
-        muted: ui.mute.checked
-      }
+  function send(type, payload = {}) {
+    return chrome.runtime.sendMessage({ type, ...payload }).then((response) => {
+      elements.debugMessage.textContent = type;
+      if (!response?.ok && response?.error) throw new Error(response.error);
+      return response;
     });
+  }
+
+  function activeProfile() {
+    if (!appState) return null;
+    return appState.profiles.find((profile) => profile.id === appState.activeProfileId) || appState.profiles[0] || null;
+  }
+
+  function setError(error) {
+    const message = error?.message || String(error || "");
+    elements.lastError.textContent = message || "-";
+    elements.statusText.textContent = message || "Something went wrong.";
+    elements.stateBadge.textContent = "Error";
+    elements.stateBadge.className = "state-badge error";
+  }
+
+  function classForState(state = "") {
+    if ([STATE.MONITORING, STATE.RUNNING_RULE, STATE.DETECTING].includes(state)) return "monitoring";
+    if ([STATE.RETRY_WAIT].includes(state)) return "retry";
+    if ([STATE.PROTECTED_CHALLENGE_WAIT, STATE.WAITING, STATE.SCHEDULED].includes(state)) return "waiting";
+    if ([STATE.ERROR].includes(state)) return "error";
+    return "idle";
+  }
+
+  function labelForState(state = "IDLE") {
+    return String(state).toLowerCase().replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function renderStatus(status = {}) {
+    const state = status.state || STATE.IDLE;
+    const profile = activeProfile();
+    const monitoredRule = (profile?.rules || []).find((rule) => rule.condition?.text);
+    elements.stateBadge.textContent = labelForState(state);
+    elements.stateBadge.className = `state-badge ${classForState(state)}`;
+    elements.statusText.textContent = status.lastAction || "Ready to monitor and automate safe workflow actions.";
+    elements.activeSite.textContent = status.activeSite || appState?.activeTab?.url?.replace(/^https?:\/\//, "").split("/")[0] || "-";
+    elements.workflowStage.textContent = status.workflowStage || "Idle";
+    elements.currentRule.textContent = status.currentRule || "-";
+    elements.monitoredText.textContent = status.monitoredText || monitoredRule?.condition?.text || "-";
+    elements.lastActionMetric.textContent = status.lastAction || "-";
+    elements.lastError.textContent = status.lastError || "-";
+    elements.debugUrl.textContent = status.currentUrl || appState?.activeTab?.url || "-";
+    renderCountdown(status.retryCountdownEndsAt);
+  }
+
+  function renderCountdown(endsAt) {
+    if (countdownTimer) clearInterval(countdownTimer);
+    const update = () => {
+      if (!endsAt) {
+        elements.retryTimer.textContent = "-";
+        return;
+      }
+      const remaining = Number(endsAt) - Date.now();
+      elements.retryTimer.textContent = remaining > 0 ? Timers.formatDuration(remaining) : "Retrying";
+    };
+    update();
+    if (endsAt) countdownTimer = setInterval(update, 1000);
+  }
+
+  function renderProfiles() {
+    const profiles = appState?.profiles || [];
+    elements.profileSelect.innerHTML = profiles.map((profile) => `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</option>`).join("");
+    elements.profileSelect.value = appState.activeProfileId || profiles[0]?.id || "";
+    const profile = activeProfile();
+    if (!profile) return;
+    elements.profileName.value = profile.name || "";
+    elements.startUrl.value = profile.startUrl || "";
+    elements.urlPatterns.value = (profile.urlPatterns || []).join(", ");
+    elements.maxAttempts.value = profile.retry?.maxAttempts ?? 5;
+    elements.baseDelay.value = Math.round((profile.retry?.baseDelayMs || 15000) / 1000);
+    elements.refreshMode.value = profile.retry?.refreshMode || REFRESH_MODES.SOFT;
+    elements.retryEnabled.checked = profile.retry?.enabled !== false;
+    elements.retryModeBadge.textContent = `${elements.refreshMode.options[elements.refreshMode.selectedIndex]?.text || "Soft refresh"}`;
+    renderRules(profile);
+  }
+
+  function renderRules(profile) {
+    const rules = profile?.rules || [];
+    elements.ruleCount.textContent = `${rules.length} rule${rules.length === 1 ? "" : "s"}`;
+    elements.ruleList.innerHTML = rules.length
+      ? rules.map((rule) => {
+        const action = rule.actions?.[0] || {};
+        return `<article class="rule-item">
+          <strong>${escapeHtml(rule.name)}</strong>
+          <span>IF ${escapeHtml(rule.condition?.type || "")} ${escapeHtml(rule.condition?.text || rule.condition?.selector || rule.condition?.pattern || "")}</span>
+          <span>THEN ${escapeHtml(action.type || "")} ${escapeHtml(action.selector || action.text || action.url || "")}</span>
+        </article>`;
+      }).join("")
+      : `<article class="rule-item"><strong>No custom rules yet</strong><span>Add a rule to start monitoring text, selectors, buttons, URLs, or error states.</span></article>`;
+  }
+
+  function renderSchedules() {
+    const schedules = appState?.schedules || [];
+    const next = schedules.filter((schedule) => schedule.enabled).sort((a, b) => a.nextRunAt - b.nextRunAt)[0];
+    elements.scheduleBadge.textContent = next ? new Date(next.nextRunAt).toLocaleString() : "No schedule";
+  }
+
+  function renderSettings() {
+    const settings = appState?.settings || Constants.DEFAULT_SETTINGS;
+    elements.notificationsEnabled.checked = settings.notifications !== false;
+    elements.soundEnabled.checked = settings.soundEnabled !== false;
+    elements.volume.value = settings.volume ?? 0.9;
+  }
+
+  function renderLogs() {
+    const logs = appState?.logs || [];
+    elements.logs.innerHTML = logs.length
+      ? logs.slice(0, 25).map((log) => `<li><time>${new Date(log.timestamp).toLocaleString()}</time><strong>${escapeHtml(log.event)}</strong> ${escapeHtml(log.level)} ${escapeHtml(JSON.stringify(log.details || {}))}</li>`).join("")
+      : `<li>No logs yet.</li>`;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#039;"
+    })[char]);
+  }
+
+  async function loadState() {
+    appState = await send(MESSAGE.GET_STATE);
+    elements.debugContent.textContent = "Storage loaded";
+    renderProfiles();
+    renderSchedules();
+    renderSettings();
+    renderLogs();
+    renderStatus(appState.status || {});
+  }
+
+  function collectProfile() {
+    const profile = activeProfile() || {};
+    return {
+      ...profile,
+      id: profile.id || `profile-${Date.now()}`,
+      name: elements.profileName.value.trim() || "Untitled Profile",
+      startUrl: elements.startUrl.value.trim(),
+      urlPatterns: elements.urlPatterns.value.split(",").map((item) => item.trim()).filter(Boolean),
+      retry: {
+        ...profile.retry,
+        enabled: elements.retryEnabled.checked,
+        maxAttempts: Number(elements.maxAttempts.value || 5),
+        baseDelayMs: Number(elements.baseDelay.value || 15) * 1000,
+        refreshMode: elements.refreshMode.value
+      }
+    };
+  }
+
+  function createRule(profile) {
+    const conditionType = elements.conditionType.value;
+    const actionType = elements.actionType.value;
+    const condition = { type: conditionType };
+    const text = elements.conditionText.value.trim();
+    const selector = elements.targetSelector.value.trim();
+    const targetText = elements.targetText.value.trim();
+
+    if ([CONDITIONS.TEXT_APPEARS, CONDITIONS.TEXT_MISSING].includes(conditionType)) condition.text = text;
+    if ([CONDITIONS.SELECTOR_EXISTS, CONDITIONS.SELECTOR_MISSING, CONDITIONS.BUTTON_ENABLED].includes(conditionType)) condition.selector = selector;
+    if (conditionType === CONDITIONS.BUTTON_ENABLED) condition.text = targetText || text;
+    if (conditionType === CONDITIONS.URL_MATCHES) condition.patterns = text ? [text] : [location.href];
+
+    const action = { type: actionType };
+    if ([ACTIONS.CLICK, ACTIONS.FOCUS, ACTIONS.FILL, ACTIONS.SCROLL_TO_ELEMENT, ACTIONS.WAIT_FOR_SELECTOR].includes(actionType)) {
+      action.selector = selector || "button, a, input, textarea, select, [role='button']";
+    }
+    if ([ACTIONS.CLICK, ACTIONS.WAIT_FOR_TEXT].includes(actionType) && targetText) action.text = targetText;
+    if (actionType === ACTIONS.FILL) action.value = elements.actionValue.value;
+    if (actionType === ACTIONS.OPEN_URL) action.url = elements.actionValue.value.trim();
+
+    return {
+      id: `rule-${Date.now()}`,
+      name: `${conditionType} -> ${actionType}`,
+      enabled: true,
+      cooldownMs: 3000,
+      condition,
+      actions: [action]
+    };
+  }
+
+  function bindEvents() {
+    elements.startBtn.addEventListener("click", () => {
+      elements.startBtn.textContent = "Running";
+      elements.stateBadge.textContent = "Detecting";
+      elements.stateBadge.className = "state-badge monitoring";
+      send(MESSAGE.START).then(loadState).catch(setError);
+    });
+    elements.stopBtn.addEventListener("click", () => send(MESSAGE.STOP, { reason: "popup" }).then(loadState).catch(setError));
+    elements.selectAreaBtn.addEventListener("click", () => send(MESSAGE.START_AREA_SELECTOR).then(() => {
+      elements.statusText.textContent = "Area selector started on the active tab.";
+    }).catch(setError));
+    elements.testNotificationBtn.addEventListener("click", () => send(MESSAGE.TEST_NOTIFICATION).catch(setError));
+    elements.testAlarmBtn.addEventListener("click", () => send(MESSAGE.TEST_ALARM).catch(setError));
+    elements.stopAlarmBtn.addEventListener("click", () => send(MESSAGE.STOP_ALARM).catch(setError));
+    elements.clearLogsBtn.addEventListener("click", () => send(MESSAGE.CLEAR_LOGS).then(loadState).catch(setError));
+
+    elements.profileSelect.addEventListener("change", () => {
+      send(MESSAGE.SET_ACTIVE_PROFILE, { profileId: elements.profileSelect.value }).then(loadState).catch(setError);
+    });
+
+    elements.saveProfileBtn.addEventListener("click", () => {
+      send(MESSAGE.SAVE_PROFILE, { profile: collectProfile() }).then(loadState).catch(setError);
+    });
+
+    elements.deleteProfileBtn.addEventListener("click", () => {
+      const profile = activeProfile();
+      if (profile) send(MESSAGE.DELETE_PROFILE, { profileId: profile.id }).then(loadState).catch(setError);
+    });
+
+    elements.saveRuleBtn.addEventListener("click", () => {
+      const profile = collectProfile();
+      profile.rules = [...(profile.rules || []), createRule(profile)];
+      send(MESSAGE.SAVE_PROFILE, { profile }).then(loadState).catch(setError);
+    });
+
+    elements.runRuleBtn.addEventListener("click", () => send(MESSAGE.RUN_RULE_ONCE).catch(setError));
+
+    elements.scheduleBtn.addEventListener("click", () => {
+      const profile = activeProfile();
+      if (!elements.scheduleDateTime.value) {
+        setError(new Error("Choose a schedule date and time."));
+        return;
+      }
+      send(MESSAGE.SCHEDULE_SAVE, {
+        schedule: {
+          profileId: profile?.id,
+          runAt: new Date(elements.scheduleDateTime.value).toISOString(),
+          recurring: elements.scheduleRecurring.value,
+          enabled: true
+        }
+      }).then(loadState).catch(setError);
+    });
+
+    elements.clearScheduleBtn.addEventListener("click", () => send(MESSAGE.SCHEDULE_CLEAR).then(loadState).catch(setError));
+
+    ["retryEnabled", "maxAttempts", "baseDelay", "refreshMode"].forEach((id) => {
+      elements[id].addEventListener("change", () => send(MESSAGE.SAVE_PROFILE, { profile: collectProfile() }).then(loadState).catch(setError));
+    });
+
+    ["notificationsEnabled", "soundEnabled", "volume"].forEach((id) => {
+      elements[id].addEventListener("change", () => send(MESSAGE.SET_SETTINGS, {
+        settings: {
+          notifications: elements.notificationsEnabled.checked,
+          soundEnabled: elements.soundEnabled.checked,
+          volume: Number(elements.volume.value)
+        }
+      }).then(loadState).catch(setError));
+    });
+  }
+
+  chrome.runtime.onMessage.addListener((message) => {
+    elements.debugMessage.textContent = message?.type || "-";
+    if (message?.type === MESSAGE.STATUS_UPDATE) {
+      appState = appState || {};
+      appState.status = message.status;
+      renderStatus(message.status);
+    }
+    if (message?.type === MESSAGE.LOG_EVENT) {
+      loadState().catch(() => {});
+    }
   });
-  ui.testNotifications.addEventListener("click", () => runtimeMessage({ type: "TEST_NOTIFICATIONS" }));
-  ui.stopAlarm.addEventListener("click", () => runtimeMessage({ type: "STOP_ALARM" }));
-  ui.scheduleRun.addEventListener("click", scheduleRun);
-  ui.clearSchedule.addEventListener("click", clearSchedule);
-  ui.saveDelays.addEventListener("click", saveDelayValues);
-  document.querySelectorAll("[data-delay-mode]").forEach((button) => {
-    button.addEventListener("click", () => setDelayMode(button.dataset.delayMode));
+
+  document.addEventListener("DOMContentLoaded", () => {
+    bindEvents();
+    loadState().catch(setError);
   });
-}
-
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local") {
-    return;
-  }
-  if (
-    changes["visaflowx.status"] ||
-    changes["visaflowx.settings"] ||
-    changes["visaflowx.credentials"] ||
-    changes["visaflowx.notificationState"] ||
-    changes["visaflowx.scheduleState"]
-  ) {
-    refresh();
-  }
-});
-
-buildWorkflowStages();
-bindEvents();
-refresh();
-countdownTimer = setInterval(updateCountdown, 1000);
-
-window.addEventListener("unload", () => {
-  if (countdownTimer) {
-    clearInterval(countdownTimer);
-  }
-});
+})(typeof globalThis !== "undefined" ? globalThis : this);

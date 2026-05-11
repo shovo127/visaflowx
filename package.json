@@ -1,11 +1,12 @@
 {
-  "name": "visaflowx",
-  "version": "1.0.0",
+  "name": "visaflowx-universal",
+  "version": "1.0.1",
   "private": true,
-  "description": "Safe IVAC Bangladesh login workflow helper Chrome extension.",
+  "description": "Production-grade universal browser workflow automation assistant extension.",
+  "license": "MIT",
   "scripts": {
-    "test": "node tests/manifest.test.js && node tests/parser.test.js && node tests/source-static.test.js",
-    "check": "node tests/manifest.test.js && node tests/parser.test.js && node tests/source-static.test.js"
+    "check": "node tests/check-syntax.js",
+    "test": "node tests/run-tests.js"
   },
-  "license": "MIT"
+  "devDependencies": {}
 }

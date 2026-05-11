@@ -1,53 +1,56 @@
-"use strict";
+(function initLogger(global) {
+  "use strict";
 
-window.VisaFlowXLogger = (() => {
-  const prefix = "VisaFlowX";
+  const SENSITIVE_KEYS = ["password", "token", "secret", "otp", "authorization", "cookie"];
 
-  function timestamp() {
-    return new Date().toISOString();
-  }
+  function maskSensitive(value) {
+    if (Array.isArray(value)) return value.map(maskSensitive);
+    if (!value || typeof value !== "object") return value;
 
-  function sanitize(value) {
-    if (value == null) {
-      return value;
-    }
-    if (typeof value === "string") {
-      return value.replace(/password\s*[:=]\s*\S+/gi, "password=[hidden]");
-    }
-    if (typeof value === "object") {
-      const clone = Array.isArray(value) ? [] : {};
-      Object.keys(value).forEach((key) => {
-        if (/password|token|secret|otp/i.test(key)) {
-          clone[key] = "[hidden]";
-        } else {
-          clone[key] = sanitize(value[key]);
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => {
+        const lower = key.toLowerCase();
+        if (SENSITIVE_KEYS.some((part) => lower.includes(part))) {
+          return [key, "[hidden]"];
         }
-      });
-      return clone;
-    }
-    return value;
+        return [key, maskSensitive(item)];
+      })
+    );
   }
 
-  function log(level, event, details) {
-    const payload = {
-      time: timestamp(),
+  function entry(level, event, details = {}) {
+    return {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      level,
       event,
-      details: sanitize(details)
+      details: maskSensitive(details),
+      timestamp: new Date().toISOString()
     };
-    if (level === "error") {
-      console.error(prefix, payload);
-      return;
-    }
-    if (level === "warn") {
-      console.warn(prefix, payload);
-      return;
-    }
-    console.info(prefix, payload);
   }
 
-  return {
-    info: (event, details) => log("info", event, details),
-    warn: (event, details) => log("warn", event, details),
-    error: (event, details) => log("error", event, details)
-  };
-})();
+  function write(level, event, details) {
+    const log = entry(level, event, details);
+    if (global.chrome && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: global.VisaFlowXUniversal?.Constants?.MESSAGE?.LOG_EVENT || "VFU_LOG_EVENT",
+        log
+      }).catch(() => {});
+    }
+    return log;
+  }
+
+  const Logger = Object.freeze({
+    create: entry,
+    debug: (event, details) => write("debug", event, details),
+    info: (event, details) => write("info", event, details),
+    warn: (event, details) => write("warn", event, details),
+    error: (event, details) => write("error", event, details),
+    maskSensitive
+  });
+
+  global.VisaFlowXUniversal = Object.assign(global.VisaFlowXUniversal || {}, { Logger });
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = Logger;
+  }
+})(typeof globalThis !== "undefined" ? globalThis : this);

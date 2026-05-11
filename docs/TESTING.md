@@ -1,18 +1,24 @@
-# VisaFlowX Testing
+# Testing Guide
 
-Run local static checks:
+## Automated Checks
 
-```powershell
+Run:
+
+```bash
 npm test
 ```
 
-Manual browser checks:
+This performs syntax, manifest, retry parser, and static safety checks.
 
-- Load unpacked extension from `D:\VisaFlowX`.
-- Save credentials in the popup.
-- Open `https://appointment.ivacbd.com/signin`.
-- Start automation and confirm `LOGIN_PAGE` detection.
-- Confirm Cloudflare is highlighted and waits for human verification.
-- Confirm OTP page stops automation and starts the alarm.
-- Schedule a future run and confirm the countdown and automatic start.
-- Clear schedule and confirm the Chrome alarm is removed.
+## Manual Browser Checks
+
+1. Load the extension from `chrome://extensions`.
+2. Open a normal website tab.
+3. Open the popup.
+4. Press **Start Monitoring**.
+5. Confirm the dashboard changes from Idle to Monitoring.
+6. Add a rule that detects visible text and scrolls to or clicks a safe button.
+7. Confirm logs update.
+8. Test **Select Area** and save a monitoring region.
+9. Create a schedule one or two minutes in the future and confirm it starts.
+10. Visit a page with a CAPTCHA or Cloudflare widget and confirm the extension waits and does not bypass it.

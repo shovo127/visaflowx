@@ -1,279 +1,139 @@
-# VisaFlowX
+# VisaFlowX Universal
 
-VisaFlowX is a production-grade Chrome Extension for safe IVAC Bangladesh appointment login workflow assistance.
+VisaFlowX Universal is a Manifest V3 browser workflow assistant for monitoring and automating safe, user-defined web workflows across multiple websites.
 
-Target site:
+It supports profile-driven rules, DOM monitoring, visual area selection, retry handling, scheduling, OTP handoff alerts, notifications, and a modern dashboard.
 
-```text
-https://appointment.ivacbd.com/signin
-```
+## Safety Boundary
 
-## What It Does
-
-- Saves contact number and password locally in Chrome extension storage.
-- Autofills the IVAC login form.
-- Detects Cloudflare Turnstile.
-- Highlights and focuses the captcha area so the user can complete verification.
-- Waits for real Cloudflare verification completion.
-- Clicks **Sign In Now** automatically after verification succeeds.
-- Detects the OTP page.
-- Stops automation immediately on OTP.
-- Focuses and highlights the OTP input.
-- Plays a loud looping alarm until manually stopped.
-- Uses `assets/sounds/videoplayback.m4a` as the primary alarm sound.
-- Shows desktop notifications.
-- Reads visible retry/cooldown messages and retries automatically after the countdown.
-- Schedules a future automation start using Chrome alarms.
-
-## Important Captcha Limitation
-
-VisaFlowX does not bypass Cloudflare, solve captcha challenges, inject tokens, use captcha-solving APIs, or fake human verification.
+VisaFlowX Universal does not bypass CAPTCHA, Cloudflare, Turnstile, reCAPTCHA, hCaptcha, anti-bot systems, or protected verification checks.
 
 Allowed behavior:
+- Detect protected verification widgets.
+- Scroll/highlight/focus the visible verification area.
+- Wait while the user completes verification manually.
+- Continue normal user-configured workflow actions after the page changes.
 
-- Detect a Turnstile widget.
-- Bring it into focus visually.
-- Wait for the user to complete verification.
-- Continue the normal login workflow after verification is detected.
+Blocked behavior:
+- No fake verification token injection.
+- No CAPTCHA solving APIs.
+- No forced verification completion.
+- No hidden challenge clicking.
+- No anti-bot evasion.
+
+## Features
+
+- Universal site profiles for IVAC, Goethe, university portals, booking portals, and registration systems.
+- MutationObserver-based monitoring with debounced rule evaluation.
+- Visual area selector for saving a monitored DOM region.
+- Text, selector, button, URL, and page-error conditions.
+- Actions for click, focus, fill, reload, back, open URL, wait for selector/text, and scroll/highlight.
+- Retry engine with backoff, jitter, retry counters, and no/soft/hard refresh modes.
+- Error recovery for 404, blank, timeout, maintenance, session expired, and rate-limit states.
+- Scheduler using `chrome.alarms` with one-time, hourly, daily, and weekly schedules.
+- OTP page handling that stops automation, focuses the OTP input, plays an alarm, and notifies the user without reading or entering any OTP.
+- Live dashboard showing active site, workflow state, retry countdown, current rule, last action, and last error.
+- Desktop notifications and test alarm support.
+- Hotkey: `Ctrl+Shift+L` toggles monitoring.
 
 ## Installation
 
-1. Open Chrome.
+1. Open Chrome or any Chromium browser.
 2. Go to `chrome://extensions`.
 3. Enable **Developer mode**.
-4. Click **Load unpacked**.
-5. Select the `D:\VisaFlowX` folder.
-6. Open `https://appointment.ivacbd.com/signin`.
-7. Click the VisaFlowX extension icon and save credentials.
-8. Press **Start Automation** or use `Ctrl + Shift + L`.
+4. Choose **Load unpacked**.
+5. Select the `VisaFlowX` folder.
+6. Pin the extension and open the popup.
 
-## Permissions
+## Basic Workflow
 
-- `storage`: saves credentials, settings, and status.
-- `notifications`: shows OTP, retry, captcha, and error alerts.
-- `tabs`: sends commands to the current IVAC tab.
-- `scripting`: supports extension workflow integration.
-- `activeTab`: works with the active IVAC tab.
-- `alarms`: runs retry countdowns reliably.
-- `offscreen`: plays the looping OTP alarm from a Manifest V3 service worker.
-- Host permission `https://appointment.ivacbd.com/*`: limits automation to the IVAC appointment site.
+1. Open the website you want to monitor.
+2. Open VisaFlowX Universal.
+3. Select or create a profile.
+4. Add monitor rules, for example:
+   - IF text appears: `Available`
+   - THEN click selector: `button`
+   - Target text: `Book`
+5. Press **Start Monitoring**.
 
-## Security
+## Visual Area Monitor
 
-- Passwords are never logged.
-- CAPTCHA tokens are never created, edited, or injected.
-- OTP is never read or autofilled.
-- No unsafe `eval()` is used.
-- DOM access is scoped and sanitized.
-- Logs are minimal and hide sensitive values.
-
-Note: credentials are stored in `chrome.storage.local` because this build uses the local-only model requested for this project. Anyone with access to the same Chrome profile and machine may be able to access extension storage.
-
-## Popup Controls
-
-- Start Automation
-- Stop Automation
-- Save Credentials
-- Schedule Run
-- Clear Schedule
-- Delete Credentials
-- Test Autofill
-- Test Detection
-- Test Notifications
-- Reset Timers
-- Fast, Balanced, and Safe delay modes
-- Volume slider
-- Mute alarm
-- Test sound
-- Stop alarm
-
-## Status Labels
-
-- IDLE
-- SCHEDULED
-- PAGE_DETECTED
-- AUTOFILLING
-- WAITING_FOR_VERIFICATION
-- VERIFICATION_COMPLETE
-- SIGNING_IN
-- OTP_DETECTED
-- RETRY_WAIT
-- COMPLETED
-- ERROR
+Use **Select Area** from the popup. Click an element or page area. VisaFlowX stores a stable selector and limits future text checks to that area when possible.
 
 ## Scheduler
 
-The Scheduler card lets the user choose a date and time for a future run. VisaFlowX stores that schedule locally and creates a `chrome.alarms` entry.
+Schedules are stored with Chrome Storage and executed by `chrome.alarms`.
 
-When the scheduled alarm fires, VisaFlowX:
+Supported recurring modes:
+- One time
+- Hourly
+- Daily
+- Weekly
 
-1. Opens or focuses `https://appointment.ivacbd.com/signin`.
-2. Waits for the tab to finish loading.
-3. Injects content scripts if they are missing.
-4. Starts the normal login workflow.
-5. Shows a desktop notification that the scheduled run started.
+When a schedule fires, the extension opens or focuses a matching tab, starts the selected profile, and continues monitoring.
 
-The popup shows the next scheduled run and a live countdown. **Clear Schedule** disables the alarm.
+## Permissions
 
-## UX Flow
+- `storage`: save profiles, rules, schedules, settings, and logs.
+- `notifications`: show workflow and error notifications.
+- `tabs`: detect and focus active tabs.
+- `scripting`: inject content scripts when the user starts monitoring.
+- `activeTab`: allow user-initiated work on the current tab.
+- `alarms`: run scheduled workflows.
+- `<all_urls>` host permission: required for universal profile support across arbitrary websites.
 
-1. Open the popup.
-2. Save contact number and password.
-3. Press **Start Automation**.
-4. VisaFlowX validates credentials and the active IVAC tab.
-5. The workflow monitor shows each stage as active or complete.
-6. The user completes Cloudflare verification manually when highlighted.
-7. VisaFlowX clicks Sign In after verification is detected.
-8. VisaFlowX stops on OTP, focuses the OTP field, shows a notification, and plays the alarm.
+## Protected Verification Limitations
 
-## Architecture
+Protected verification systems are intentionally outside the automation boundary. When detected, the extension can highlight the area and wait. The user must complete any CAPTCHA or Cloudflare verification manually.
 
-```text
-Popup UI
-  -> background/service-worker.js
-      -> validates credentials
-      -> detects active IVAC tab
-      -> injects content scripts when needed
-      -> owns notifications, alarms, retry scheduling, offscreen audio
-          -> content/automation.js
-              -> centralized AutomationController state machine
-              -> detector/autofill/retry/otp modules
-              -> safe Cloudflare focus/wait handling
-                  -> IVAC page DOM
-```
+## OTP Handling
 
-Core modules:
-
-- `utils/constants.js`: workflow states, labels, and message constants.
-- `content/automation.js`: centralized state-machine controller.
-- `content/detector.js`: page, captcha, OTP, and Sign In detection.
-- `content/retry-engine.js`: visible cooldown parsing and retry scheduling.
-- `background/offscreen.js`: looping alarm playback with `videoplayback.m4a`.
-- `background/service-worker.js`: schedule alarms, notifications, tab orchestration, and content-script injection.
-
-## Developer Debug
-
-The popup includes a collapsible **Developer Debug** panel showing:
-
-- Active tab URL.
-- Injection success.
-- Detector state.
-- Workflow state.
-- Content script status.
-- Last runtime message.
-- Last error.
-
-## Retry Detection Examples
-
-VisaFlowX can parse visible messages like:
-
-- `Try again after 5 minutes`
-- `Login after 9 minutes`
-- `Please wait 30 seconds`
-- `Try again after 1 minute 20 seconds`
-- `Please wait 07:30`
-
-When a cooldown is found, the extension schedules a retry and continues automatically after the timer ends.
-
-## Troubleshooting
-
-If autofill does not happen:
-
-- Confirm the extension is enabled.
-- Confirm credentials are saved.
-- Refresh the IVAC login page.
-- Click **Test Detection** in the popup.
-
-If the alarm does not play:
-
-- Confirm volume is above zero.
-- Confirm mute is off.
-- Confirm `assets/sounds/videoplayback.m4a` exists.
-- Click **Test Sound**.
-- Check that the extension has the `offscreen` permission.
-
-If Sign In does not click:
-
-- Complete Cloudflare verification manually.
-- Wait until the captcha state changes to verified.
-- Confirm the Sign In button is visible and enabled.
+OTP and verification-code pages are manual handoff points. When detected, VisaFlowX Universal stops the workflow, focuses the visible OTP input when one is available, plays the configured alarm, and shows a desktop notification. It does not read OTP fields and does not continue past an OTP page until the user acts manually.
 
 ## Testing
 
-Run the dependency-free checks from the project folder:
+Run:
 
-```powershell
+```bash
 npm test
 ```
 
-The test suite verifies:
+The test suite validates:
+- Manifest structure and permissions.
+- Content script registration.
+- Retry time parsing.
+- Rule engine exports.
+- Static safety checks for prohibited CAPTCHA/Cloudflare bypass APIs.
+- OTP detection and manual-handoff safety checks.
+- JavaScript syntax for all extension files.
 
-- Manifest V3 configuration.
-- Required files and permissions.
-- Retry timer parsing.
-- Static safety checks for unsafe `eval()`.
-- MutationObserver usage in the automation flow.
-- Centralized workflow controller and required popup sections.
+## Troubleshooting
 
-Manual browser tests should cover:
+If monitoring does not start:
+- Confirm you are on a normal `http` or `https` page.
+- Check the Developer Debug panel in the popup.
+- Confirm the active profile URL pattern matches the current site.
+- Press **Start Monitoring** again; the service worker retries content injection.
 
-- Login page detection.
-- Captcha wait flow.
-- OTP detection.
-- Notification and alarm controls.
-- Popup responsiveness.
-- Credential save/update/delete persistence.
+If a rule does not run:
+- Verify the selector is valid.
+- Use the visual area selector to capture a stable element.
+- Check whether the rule cooldown is active.
+- Review logs in the popup.
 
-## FAQ
+If a schedule does not fire:
+- Confirm Chrome is running.
+- Confirm the schedule date is in the future or recurring.
+- Check that the profile has a valid start URL.
 
-### Does VisaFlowX solve Cloudflare captcha?
+## Architecture
 
-No. It detects the Cloudflare Turnstile widget, highlights it, waits for legitimate user verification, and then continues the login workflow.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-### Why does the extension not click the Cloudflare checkbox automatically?
+## Security
 
-Automatically clicking or solving a Cloudflare challenge is security-challenge automation. VisaFlowX is intentionally limited to compliant workflow assistance.
-
-### Does VisaFlowX auto-fill OTP?
-
-No. It stops at the OTP page, focuses the OTP input, shows a notification, and plays an alarm so the user can enter the OTP manually.
-
-### Where are credentials stored?
-
-Credentials are stored in Chrome extension local storage for this build. Password values are never logged. Chrome extensions do not provide a general-purpose password-manager-grade “Secure Storage API,” so keep the Chrome profile and computer account protected.
-
-### Can delay values be changed?
-
-Yes. Choose Fast, Balanced, or Safe in the popup, edit the delay values, and click **Save Delay Values**.
-
-## Screenshots
-
-Add production screenshots here before publishing:
-
-- Popup dashboard
-- Credentials section
-- OTP alarm state
-- Captcha waiting state
-
-## Known Limitations
-
-- Cloudflare cannot and should not be solved automatically.
-- IVAC page DOM changes may require selector updates.
-- Chrome local storage is profile-local, not cloud-synced secure password storage.
-- Alarm playback can depend on Chrome extension audio policies, but this build uses an offscreen document for reliability.
-
-## Future Improvements
-
-- Optional PIN-based local encryption.
-- Export/import settings.
-- Branded icons.
-- More detailed diagnostics panel.
-- Optional light theme.
+See [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).
-
-## License
-
-MIT. See [LICENSE](LICENSE).

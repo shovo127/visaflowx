@@ -1,123 +1,87 @@
-"use strict";
+(function initParser(global) {
+  "use strict";
 
-window.VisaFlowXParser = (() => {
-  const COOLDOWN_HINT = /(try again|login|log in|sign in|signin|wait|after|later|cooldown|too many|attempt|temporarily|please wait|retry)/i;
-
-  function parseNumber(value) {
-    const number = Number(String(value || "").replace(/[^\d.]/g, ""));
-    return Number.isFinite(number) ? number : 0;
+  function normalizeText(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
   }
 
-  function parseTimeParts(text) {
-    const source = String(text || "").toLowerCase();
-    let seconds = 0;
-    let matched = false;
+  function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
 
-    const unitPattern = /(\d+(?:\.\d+)?)\s*(hours?|hrs?|hr|h|minutes?|mins?|min|m|seconds?|secs?|sec|s)\b/g;
-    let unitMatch = unitPattern.exec(source);
-    while (unitMatch) {
-      const value = parseNumber(unitMatch[1]);
-      const unit = unitMatch[2];
-      matched = true;
-      if (/^h/.test(unit)) {
-        seconds += value * 3600;
-      } else if (/^m/.test(unit)) {
-        seconds += value * 60;
-      } else if (/^s/.test(unit)) {
-        seconds += value;
+  function textMatches(haystack, needle, caseSensitive = false) {
+    const source = normalizeText(haystack);
+    const target = normalizeText(needle);
+    if (!target) return false;
+    return caseSensitive ? source.includes(target) : source.toLowerCase().includes(target.toLowerCase());
+  }
+
+  function parseRetryDelay(text) {
+    const source = normalizeText(text).toLowerCase();
+    if (!source) return null;
+
+    const likelyRetry = /(try again|retry|please wait|wait|after|later|cooldown|login after|too many requests|rate limit)/i.test(source);
+    if (!likelyRetry) return null;
+
+    let ms = 0;
+    const durationPattern = /(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m(?!s)|seconds?|secs?|s)\b/g;
+    let match;
+    while ((match = durationPattern.exec(source))) {
+      const amount = Number(match[1]);
+      const unit = match[2];
+      if (/^h|hour|hr/.test(unit)) ms += amount * 60 * 60 * 1000;
+      else if (/^m(?!s)|min|minute/.test(unit)) ms += amount * 60 * 1000;
+      else if (/^s|sec|second/.test(unit)) ms += amount * 1000;
+    }
+
+    const clockMatch = source.match(/\b(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\b/);
+    if (!ms && clockMatch) {
+      const hours = Number(clockMatch[1] || 0);
+      const minutes = Number(clockMatch[2] || 0);
+      const seconds = Number(clockMatch[3] || 0);
+      ms = ((hours * 3600) + (minutes * 60) + seconds) * 1000;
+    }
+
+    const bareMinute = source.match(/\bafter\s+(\d{1,3})\b|\bwait\s+(\d{1,3})\b|\blogin\s+after\s+(\d{1,3})\b/);
+    if (!ms && bareMinute) {
+      ms = Number(bareMinute[1] || bareMinute[2] || bareMinute[3]) * 60 * 1000;
+    }
+
+    if (!ms) return null;
+    return {
+      ms: Math.max(1000, Math.round(ms)),
+      source: normalizeText(text).slice(0, 240)
+    };
+  }
+
+  function wildcardToRegExp(pattern) {
+    const escaped = escapeRegExp(pattern || "*").replace(/\\\*/g, ".*");
+    return new RegExp(`^${escaped}$`, "i");
+  }
+
+  function urlMatches(url, patterns = []) {
+    if (!patterns.length) return true;
+    return patterns.some((pattern) => {
+      if (!pattern || pattern === "*") return true;
+      if (pattern.startsWith("/") && pattern.endsWith("/")) {
+        return new RegExp(pattern.slice(1, -1), "i").test(url);
       }
-      unitMatch = unitPattern.exec(source);
-    }
-
-    if (matched) {
-      return Math.ceil(seconds);
-    }
-
-    const hmsMatch = source.match(/\b(\d{1,2}):(\d{1,2}):(\d{2})\b/);
-    if (hmsMatch) {
-      return Number(hmsMatch[1]) * 3600 + Number(hmsMatch[2]) * 60 + Number(hmsMatch[3]);
-    }
-
-    const msMatch = source.match(/\b(\d{1,2}):(\d{2})\b/);
-    if (msMatch) {
-      return Number(msMatch[1]) * 60 + Number(msMatch[2]);
-    }
-
-    const slashMinuteMatch = source.match(/\b(\d{1,2})\s*\/\s*(\d{1,2})\b/);
-    if (slashMinuteMatch) {
-      return Math.max(Number(slashMinuteMatch[1]), Number(slashMinuteMatch[2])) * 60;
-    }
-
-    const impliedMinuteMatch = source.match(/(?:after|wait|later|login|log in|sign in)\D{0,16}(\d{1,2})\b/);
-    if (impliedMinuteMatch) {
-      return Number(impliedMinuteMatch[1]) * 60;
-    }
-
-    return 0;
+      return wildcardToRegExp(pattern.includes("*") ? pattern : `*${pattern}*`).test(url);
+    });
   }
 
-  function collectCandidateSnippets(text) {
-    const lines = String(text || "")
-      .split(/\n+/)
-      .map((line) => line.trim())
-      .filter(Boolean);
+  const Parser = Object.freeze({
+    escapeRegExp,
+    normalizeText,
+    parseRetryDelay,
+    textMatches,
+    urlMatches,
+    wildcardToRegExp
+  });
 
-    const candidates = [];
-    for (const line of lines) {
-      if (COOLDOWN_HINT.test(line)) {
-        candidates.push(line.slice(0, 240));
-      }
-    }
+  global.VisaFlowXUniversal = Object.assign(global.VisaFlowXUniversal || {}, { Parser });
 
-    const compact = String(text || "").replace(/\s+/g, " ");
-    const phrasePattern = /(try again|login|log in|sign in|signin|please wait|wait|after|later|cooldown|too many|temporarily|retry).{0,140}/gi;
-    let phraseMatch = phrasePattern.exec(compact);
-    while (phraseMatch) {
-      candidates.push(phraseMatch[0]);
-      phraseMatch = phrasePattern.exec(compact);
-    }
-
-    return Array.from(new Set(candidates));
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = Parser;
   }
-
-  function parseCooldownText(text) {
-    const snippets = collectCandidateSnippets(text);
-    let best = null;
-
-    for (const snippet of snippets) {
-      const seconds = parseTimeParts(snippet);
-      if (seconds > 0 && (!best || seconds > best.seconds)) {
-        best = {
-          seconds,
-          matchedText: snippet.trim()
-        };
-      }
-    }
-
-    return best;
-  }
-
-  function humanizeSeconds(totalSeconds) {
-    const seconds = Math.max(0, Math.ceil(Number(totalSeconds) || 0));
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const rest = seconds % 60;
-    const parts = [];
-    if (hours) {
-      parts.push(`${hours}h`);
-    }
-    if (minutes) {
-      parts.push(`${minutes}m`);
-    }
-    if (rest || !parts.length) {
-      parts.push(`${rest}s`);
-    }
-    return parts.join(" ");
-  }
-
-  return {
-    parseCooldownText,
-    humanizeSeconds,
-    parseTimeParts
-  };
-})();
+})(typeof globalThis !== "undefined" ? globalThis : this);

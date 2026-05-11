@@ -1,50 +1,51 @@
-"use strict";
+(function initTimers(global) {
+  "use strict";
 
-window.VisaFlowXTimers = (() => {
   function sleep(ms) {
-    return new Promise((resolve) => {
-      setTimeout(resolve, Math.max(0, Number(ms) || 0));
-    });
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
   }
 
-  function debounce(fn, wait) {
+  function debounce(fn, wait = 150) {
     let timer = null;
     return (...args) => {
-      if (timer) {
-        clearTimeout(timer);
-      }
-      timer = setTimeout(() => {
-        timer = null;
-        fn(...args);
-      }, wait);
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), wait);
     };
   }
 
-  function getActiveDelays(settings) {
-    const mode = settings && settings.delayMode ? settings.delayMode : "balanced";
-    const delays = settings && settings.delays ? settings.delays : {};
-    return delays[mode] || delays.balanced || {
-      autofill: 250,
-      signIn: 900,
-      retryBuffer: 2000,
-      domWait: 600
-    };
+  function withTimeout(promise, ms, message = "Operation timed out") {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
   }
 
-  function formatRemaining(ms) {
+  function nextRetryDelay(attempt, retry = {}) {
+    const baseDelayMs = Number(retry.baseDelayMs || 15000);
+    const maxDelayMs = Number(retry.maxDelayMs || 180000);
+    const jitterPercent = Number(retry.jitterPercent || 0);
+    const exponential = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, Math.max(0, attempt - 1)));
+    const jitter = exponential * (jitterPercent / 100);
+    const delta = jitter ? Math.round((Math.random() * jitter * 2) - jitter) : 0;
+    return Math.max(1000, Math.min(maxDelayMs, exponential + delta));
+  }
+
+  function formatDuration(ms) {
     const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-    const minutes = Math.floor(totalSeconds / 60);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
-    if (minutes <= 0) {
-      return `${seconds}s`;
-    }
-    return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+    if (hours) return `${hours}h ${minutes}m ${seconds}s`;
+    if (minutes) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
   }
 
-  return {
-    sleep,
-    debounce,
-    getActiveDelays,
-    formatRemaining
-  };
-})();
+  const Timers = Object.freeze({ debounce, formatDuration, nextRetryDelay, sleep, withTimeout });
+
+  global.VisaFlowXUniversal = Object.assign(global.VisaFlowXUniversal || {}, { Timers });
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = Timers;
+  }
+})(typeof globalThis !== "undefined" ? globalThis : this);

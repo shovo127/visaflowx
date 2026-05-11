@@ -1,1084 +1,579 @@
+/* global chrome, importScripts */
 "use strict";
 
-importScripts("../utils/constants.js");
+importScripts(
+  "../utils/constants.js",
+  "../utils/logger.js",
+  "../utils/timers.js",
+  "../utils/parser.js",
+  "../utils/storage.js"
+);
 
-const VF_CONSTANTS = self.VisaFlowXConstants;
-const VF_STATES = VF_CONSTANTS.WORKFLOW_STATES;
-const VF_STATE_LABELS = VF_CONSTANTS.STATE_LABELS;
+const { Constants, Logger, Parser, Storage } = self.VisaFlowXUniversal;
+const { MESSAGE, STATE, STORAGE_KEYS } = Constants;
 
-const VF_KEYS = {
-  credentials: "visaflowx.credentials",
-  settings: "visaflowx.settings",
-  status: "visaflowx.status",
-  retryState: "visaflowx.retryState",
-  scheduleState: "visaflowx.scheduleState",
-  notificationState: "visaflowx.notificationState"
-};
-
-const IVAC_SIGNIN_URL = "https://appointment.ivacbd.com/signin";
-const SCHEDULE_ALARM_NAME = "visaflowx-scheduled-start";
-
-const DEFAULT_SETTINGS = {
-  automationEnabled: false,
-  delayMode: "balanced",
-  delays: {
-    fast: {
-      autofill: 120,
-      signIn: 450,
-      retryBuffer: 1000,
-      domWait: 300
-    },
-    balanced: {
-      autofill: 250,
-      signIn: 900,
-      retryBuffer: 2000,
-      domWait: 600
-    },
-    safe: {
-      autofill: 500,
-      signIn: 1500,
-      retryBuffer: 3500,
-      domWait: 1000
-    }
-  },
-  sound: {
-    volume: 1,
-    muted: false
-  },
-  notifications: {
-    otp: true,
-    retry: true,
-    captcha: true,
-    errors: true,
-    login: true
-  }
-};
-
-const DEFAULT_STATUS = {
-  workflowState: "IDLE",
-  state: "Idle",
-  actionRequired: "Press Start Automation when ready.",
-  currentPage: "Unknown",
-  automationEnabled: false,
-  activeAutomationTabId: null,
-  timerStatus: "None",
-  retryEndsAt: null,
-  lastLoginAttempt: null,
-  scheduleEnabled: false,
-  scheduledAt: null,
-  captchaState: "Unknown",
-  otpDetected: false,
-  lastError: "",
-  debug: {
-    activeTabUrl: "",
-    injectionSuccess: false,
-    detectorState: "Unknown",
-    workflowState: "IDLE",
-    contentScriptStatus: "Not checked",
-    lastRuntimeMessage: "",
-    lastError: ""
-  },
-  lastEventAt: null,
-  lastMessage: "Ready"
-};
-
-const DEFAULT_SCHEDULE_STATE = {
-  enabled: false,
-  scheduledAt: null,
-  createdAt: null,
-  lastStartedAt: null,
-  lastClearedAt: null,
-  lastError: ""
-};
-
-async function storageGet(key, fallback) {
-  const data = await chrome.storage.local.get(key);
-  return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : fallback;
-}
-
-async function storageSet(key, value) {
-  await chrome.storage.local.set({ [key]: value });
-}
-
-async function getSettings() {
-  const saved = await storageGet(VF_KEYS.settings, {});
-  return mergeDeep(DEFAULT_SETTINGS, saved || {});
-}
-
-async function setSettings(patch) {
-  const current = await getSettings();
-  const next = mergeDeep(current, patch || {});
-  await storageSet(VF_KEYS.settings, next);
-  return next;
-}
-
-async function getStatus() {
-  const saved = await storageGet(VF_KEYS.status, {});
-  return mergeDeep(DEFAULT_STATUS, saved || {});
-}
-
-async function getScheduleState() {
-  const saved = await storageGet(VF_KEYS.scheduleState, {});
-  return mergeDeep(DEFAULT_SCHEDULE_STATE, saved || {});
-}
-
-async function setScheduleState(patch) {
-  const current = await getScheduleState();
-  const next = {
-    ...current,
-    ...(patch || {})
-  };
-  await storageSet(VF_KEYS.scheduleState, next);
-  return next;
-}
-
-async function setStatus(patch) {
-  const current = await getStatus();
-  const debug = patch && patch.debug ? mergeDeep(current.debug || DEFAULT_STATUS.debug, patch.debug) : current.debug;
-  const next = {
-    ...current,
-    ...(patch || {}),
-    debug,
-    lastEventAt: new Date().toISOString()
-  };
-  await storageSet(VF_KEYS.status, next);
-  return next;
-}
-
-function mergeDeep(base, patch) {
-  if (!patch || typeof patch !== "object") {
-    return base;
-  }
-
-  const output = Array.isArray(base) ? [...base] : { ...base };
-  Object.keys(patch).forEach((key) => {
-    const value = patch[key];
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      base &&
-      typeof base[key] === "object" &&
-      !Array.isArray(base[key])
-    ) {
-      output[key] = mergeDeep(base[key], value);
-      return;
-    }
-    output[key] = value;
-  });
-  return output;
-}
-
-function retryAlarmName(tabId) {
-  return `visaflowx-retry-${tabId}`;
-}
-
-function formatScheduleTime(timestamp) {
-  if (!timestamp) {
-    return "No schedule set";
-  }
-  return new Date(timestamp).toLocaleString();
-}
-
-async function notify(notificationId, title, message) {
-  await chrome.notifications.create(notificationId || `visaflowx-${Date.now()}`, {
-    type: "basic",
-    iconUrl: chrome.runtime.getURL("assets/icons/icon-128.png"),
-    title,
-    message,
-    priority: 2
-  });
-}
-
-function hasCredentials(credentials) {
-  return Boolean(
-    credentials &&
-      String(credentials.contactNumber || "").trim() &&
-      String(credentials.password || "")
-  );
-}
-
-async function getActiveTab() {
-  const tabs = await chrome.tabs.query({
-    active: true,
-    currentWindow: true
-  });
-  return tabs[0] || null;
-}
-
-function isIvAcSigninUrl(url) {
-  return /https:\/\/appointment\.ivacbd\.com\/signin(?:[/?#]|$)/i.test(String(url || ""));
-}
-
-function isIvAcUrl(url) {
-  return /^https:\/\/appointment\.ivacbd\.com\//i.test(String(url || ""));
-}
-
-async function ensureOffscreenDocument() {
-  if (!chrome.offscreen) {
-    return false;
-  }
-
-  const url = chrome.runtime.getURL("background/offscreen.html");
-  const contexts = chrome.runtime.getContexts
-    ? await chrome.runtime.getContexts({
-        contextTypes: ["OFFSCREEN_DOCUMENT"],
-        documentUrls: [url]
-      })
-    : [];
-
-  if (contexts.length > 0) {
-    return true;
-  }
-
-  await chrome.offscreen.createDocument({
-    url: "background/offscreen.html",
-    reasons: ["AUDIO_PLAYBACK"],
-    justification: "Play a looping OTP alarm until the user manually stops it."
-  });
-  return true;
-}
-
-async function playAlarm(options = {}) {
-  const settings = await getSettings();
-  const sound = {
-    ...settings.sound,
-    ...(options.sound || {})
-  };
-  const ready = await ensureOffscreenDocument();
-  if (!ready) {
-    return;
-  }
-  await chrome.runtime.sendMessage({
-    type: "OFFSCREEN_PLAY_ALARM",
-    sound
-  });
-}
-
-async function stopAlarm() {
-  await chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP_ALARM" }).catch(() => {});
-}
-
-async function updateAlarmSound(sound) {
-  const settings = await setSettings({ sound });
-  await chrome.runtime
-    .sendMessage({
-      type: "OFFSCREEN_UPDATE_SOUND",
-      sound: settings.sound
-    })
-    .catch(() => {});
-  return settings.sound;
-}
-
-const CONTENT_SCRIPT_FILES = [
+const CONTENT_FILES = [
   "utils/constants.js",
   "utils/logger.js",
-  "utils/storage.js",
   "utils/timers.js",
   "utils/dom-utils.js",
   "utils/parser.js",
+  "rules/rule-engine.js",
+  "rules/action-runner.js",
+  "content/otp-detector.js",
   "content/notification-handler.js",
-  "content/detector.js",
-  "content/autofill.js",
-  "content/retry-engine.js",
-  "content/otp-monitor.js",
-  "content/automation.js"
+  "content/overlay-selector.js",
+  "content/monitor.js",
+  "content/bootstrap.js"
 ];
 
-async function injectContentScripts(tabId) {
+function chromeCallback(fn) {
+  return new Promise((resolve, reject) => {
+    fn((result) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(result);
+    });
+  });
+}
+
+async function getActiveTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tabs[0] || null;
+}
+
+function isInjectableUrl(url = "") {
+  return /^https?:\/\//i.test(url) || /^file:\/\//i.test(url);
+}
+
+async function getAppState() {
+  const defaults = await Storage.ensureDefaults();
+  const current = await Storage.get({
+    [STORAGE_KEYS.PROFILES]: defaults.profiles,
+    [STORAGE_KEYS.ACTIVE_PROFILE_ID]: defaults.activeProfileId,
+    [STORAGE_KEYS.SETTINGS]: defaults.settings,
+    [STORAGE_KEYS.STATUS]: defaults.status,
+    [STORAGE_KEYS.LOGS]: defaults.logs,
+    [STORAGE_KEYS.SCHEDULES]: defaults.schedules
+  });
+
+  const profiles = current[STORAGE_KEYS.PROFILES] || [];
+  const activeProfileId = current[STORAGE_KEYS.ACTIVE_PROFILE_ID] || profiles[0]?.id || "";
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId) || profiles[0] || null;
+
+  return {
+    profiles,
+    activeProfileId,
+    activeProfile,
+    settings: current[STORAGE_KEYS.SETTINGS] || {},
+    status: current[STORAGE_KEYS.STATUS] || {},
+    logs: current[STORAGE_KEYS.LOGS] || [],
+    schedules: current[STORAGE_KEYS.SCHEDULES] || []
+  };
+}
+
+async function appendLog(log) {
+  const state = await getAppState();
+  const logs = [log, ...state.logs].slice(0, state.settings.maxLogs || 80);
+  await Storage.set({ [STORAGE_KEYS.LOGS]: logs });
+  await broadcast({ type: MESSAGE.LOG_EVENT, log });
+}
+
+async function log(level, event, details = {}) {
+  const entry = Logger.create(level, event, details);
+  await appendLog(entry);
+  return entry;
+}
+
+async function updateStatus(patch) {
+  const state = await getAppState();
+  const status = {
+    ...state.status,
+    ...patch,
+    updatedAt: new Date().toISOString()
+  };
+  await Storage.set({ [STORAGE_KEYS.STATUS]: status });
+  await broadcast({ type: MESSAGE.STATUS_UPDATE, status });
+  return status;
+}
+
+async function broadcast(message) {
+  try {
+    await chrome.runtime.sendMessage(message);
+  } catch (_) {
+    // Popup may be closed; storage still holds the source of truth.
+  }
+}
+
+async function notify(title, message) {
+  const state = await getAppState();
+  if (!state.settings.notifications) return;
+  await chrome.notifications.create({
+    type: "basic",
+    iconUrl: "assets/icons/icon128.png",
+    title,
+    message
+  });
+}
+
+async function ensureContent(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  if (!tab || !isInjectableUrl(tab.url || "")) {
+    throw new Error("Active tab is not a supported web page.");
+  }
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: MESSAGE.PING });
+    if (response?.ready) {
+      return { injected: false, ready: true, url: tab.url };
+    }
+  } catch (_) {
+    // Expected when the content script has not been attached yet.
+  }
+
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: CONTENT_SCRIPT_FILES
+    files: CONTENT_FILES
   });
+
+  const response = await chrome.tabs.sendMessage(tabId, { type: MESSAGE.PING });
+  if (!response?.ready) {
+    throw new Error("Content script injection completed but the page did not respond.");
+  }
+  return { injected: true, ready: true, url: tab.url };
 }
 
-async function waitForTabReady(tabId, timeoutMs = 20000) {
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (tab && tab.status === "complete") {
-    return tab;
+function findProfileForUrl(profiles, url) {
+  return profiles.find((profile) => profile.enabled !== false && Parser.urlMatches(url, profile.urlPatterns || [])) || profiles[0] || null;
+}
+
+async function sendToTab(tabId, message) {
+  return chrome.tabs.sendMessage(tabId, message);
+}
+
+async function startMonitoring({ tabId, profileId, source = "manual" } = {}) {
+  const tab = tabId ? await chrome.tabs.get(tabId) : await getActiveTab();
+  if (!tab?.id) throw new Error("No active tab found.");
+  if (!isInjectableUrl(tab.url || "")) throw new Error("Open a normal website tab before starting automation.");
+
+  const state = await getAppState();
+  let profile = profileId ? state.profiles.find((item) => item.id === profileId) : state.activeProfile;
+  if (!profile || !Parser.urlMatches(tab.url || "", profile.urlPatterns || [])) {
+    profile = findProfileForUrl(state.profiles, tab.url || "");
   }
+  if (!profile) throw new Error("No workflow profile is available.");
 
-  return new Promise((resolve) => {
-    let finished = false;
-    const timeout = setTimeout(async () => {
-      if (finished) {
-        return;
-      }
-      finished = true;
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve(await chrome.tabs.get(tabId).catch(() => null));
-    }, timeoutMs);
-
-    function listener(updatedTabId, changeInfo, updatedTab) {
-      if (updatedTabId !== tabId || changeInfo.status !== "complete") {
-        return;
-      }
-      finished = true;
-      clearTimeout(timeout);
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve(updatedTab);
-    }
-
-    chrome.tabs.onUpdated.addListener(listener);
+  await Storage.set({ [STORAGE_KEYS.ACTIVE_PROFILE_ID]: profile.id });
+  const injection = await ensureContent(tab.id);
+  const status = await updateStatus({
+    state: STATE.MONITORING,
+    activeSite: new URL(tab.url).hostname,
+    activeTabId: tab.id,
+    activeProfileId: profile.id,
+    workflowStage: "Monitoring",
+    currentRule: "",
+    lastAction: source === "schedule" ? "Scheduled workflow started" : "Workflow started",
+    lastError: "",
+    monitoring: true
   });
-}
 
-async function focusOrOpenSigninTab() {
-  const tabs = await chrome.tabs.query({ url: "https://appointment.ivacbd.com/*" });
-  let tab = tabs.find((candidate) => isIvAcSigninUrl(candidate.url)) || null;
-
-  if (!tab) {
-    tab = await chrome.tabs.create({
-      url: IVAC_SIGNIN_URL,
-      active: true
-    });
-  } else {
-    await chrome.tabs.update(tab.id, { active: true });
-    if (tab.windowId != null) {
-      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-    }
-  }
-
-  await waitForTabReady(tab.id);
-  return chrome.tabs.get(tab.id);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+  await sendToTab(tab.id, {
+    type: MESSAGE.START,
+    profile,
+    settings: state.settings,
+    source
   });
+
+  await log("info", "monitoring_started", { source, tabId: tab.id, url: tab.url, profileId: profile.id, injection });
+  await notify("VisaFlowX Universal started", `Monitoring profile: ${profile.name}`);
+  return { ok: true, injection, status, profileId: profile.id };
 }
 
-async function pingContentScript(tabId) {
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: "PING_CONTENT" });
-    return response && response.ok ? response : null;
-  } catch (error) {
-    return null;
-  }
-}
-
-async function ensureContentScripts(tabId, activeTabUrl) {
-  const initialPing = await pingContentScript(tabId);
-  if (initialPing) {
-    await setStatus({
-      debug: {
-        activeTabUrl,
-        injectionSuccess: true,
-        detectorState: initialPing.page || "Unknown",
-        workflowState: initialPing.workflowState || "IDLE",
-        contentScriptStatus: "Already attached",
-        lastRuntimeMessage: "PING_CONTENT"
-      }
-    });
-    return {
-      ok: true,
-      injected: false,
-      ping: initialPing
-    };
-  }
-
-  let lastError = "";
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+async function stopMonitoring({ tabId, reason = "manual" } = {}) {
+  const activeTab = tabId ? { id: tabId } : await getActiveTab();
+  if (activeTab?.id) {
     try {
-      await injectContentScripts(tabId);
-      await sleep(150 * attempt);
-      const ping = await pingContentScript(tabId);
-      if (ping) {
-        await setStatus({
-          debug: {
-            activeTabUrl,
-            injectionSuccess: true,
-            detectorState: ping.page || "Unknown",
-            workflowState: ping.workflowState || "IDLE",
-            contentScriptStatus: `Injected successfully on attempt ${attempt}`,
-            lastRuntimeMessage: "PING_CONTENT"
-          }
-        });
-        return {
-          ok: true,
-          injected: true,
-          attempt,
-          ping
-        };
-      }
-      lastError = `Content script ping failed after injection attempt ${attempt}.`;
-    } catch (error) {
-      lastError = error && error.message ? error.message : "Content script injection failed.";
+      await sendToTab(activeTab.id, { type: MESSAGE.STOP, reason });
+    } catch (_) {
+      // Tab may already be closed or restricted.
     }
   }
-
-  await setStatus({
-    debug: {
-      activeTabUrl,
-      injectionSuccess: false,
-      contentScriptStatus: "Injection failed",
-      lastRuntimeMessage: "PING_CONTENT",
-      lastError
-    }
+  const status = await updateStatus({
+    state: STATE.STOPPED,
+    workflowStage: "Stopped",
+    currentRule: "",
+    retryCountdownEndsAt: null,
+    lastAction: `Automation stopped (${reason})`,
+    monitoring: false
   });
+  await log("info", "monitoring_stopped", { reason, tabId: activeTab?.id || null });
+  return { ok: true, status };
+}
+
+function normalizeProfile(profile) {
+  const now = Date.now();
   return {
-    ok: false,
-    error: lastError || "Content script did not respond after injection."
+    id: profile.id || `profile-${now}`,
+    name: String(profile.name || "Untitled Profile").trim(),
+    enabled: profile.enabled !== false,
+    startUrl: String(profile.startUrl || "").trim(),
+    urlPatterns: Array.isArray(profile.urlPatterns) && profile.urlPatterns.length ? profile.urlPatterns : ["*"],
+    monitorRegion: profile.monitorRegion || null,
+    retry: { ...Constants.DEFAULT_RETRY, ...(profile.retry || {}) },
+    schedule: { enabled: false, recurring: "none", runAt: "", ...(profile.schedule || {}) },
+    rules: Array.isArray(profile.rules) ? profile.rules : []
   };
 }
 
-async function sendToActiveIvAcTab(message, options = {}) {
-  const tab = await getActiveTab();
-  if (!tab || !tab.id) {
-    return {
-      ok: false,
-      error: "Open the IVAC appointment page in the active tab."
-    };
-  }
-
-  const activeTabUrl = tab.url || "";
-  await setStatus({
-    debug: {
-      activeTabUrl,
-      lastRuntimeMessage: message.type || "UNKNOWN"
-    }
+async function saveProfile(profile) {
+  const state = await getAppState();
+  const normalized = normalizeProfile(profile);
+  const profiles = state.profiles.some((item) => item.id === normalized.id)
+    ? state.profiles.map((item) => (item.id === normalized.id ? normalized : item))
+    : [...state.profiles, normalized];
+  await Storage.set({
+    [STORAGE_KEYS.PROFILES]: profiles,
+    [STORAGE_KEYS.ACTIVE_PROFILE_ID]: normalized.id
   });
-
-  if (options.requireSignin && !isIvAcSigninUrl(activeTabUrl)) {
-    const error = "Open https://appointment.ivacbd.com/signin in the active tab.";
-    return {
-      ok: false,
-      error,
-      tabId: tab.id,
-      activeTabUrl
-    };
-  }
-
-  if (!isIvAcUrl(activeTabUrl)) {
-    const error = "The active tab is not an IVAC appointment page.";
-    return {
-      ok: false,
-      error,
-      tabId: tab.id,
-      activeTabUrl
-    };
-  }
-
-  const ready = options.injectIfMissing
-    ? await ensureContentScripts(tab.id, activeTabUrl)
-    : { ok: Boolean(await pingContentScript(tab.id)) };
-
-  if (!ready.ok) {
-    return {
-      tabId: tab.id,
-      activeTabUrl,
-      ok: false,
-      error: ready.error || "Content script is not ready."
-    };
-  }
-
-  try {
-    const response = await chrome.tabs.sendMessage(tab.id, message);
-    await setStatus({
-      debug: {
-        activeTabUrl,
-        injectionSuccess: true,
-        detectorState: response && response.page ? response.page : undefined,
-        workflowState: response && response.workflowState ? response.workflowState : undefined,
-        contentScriptStatus: "Message delivered",
-        lastRuntimeMessage: message.type || "UNKNOWN",
-        lastError: ""
-      }
-    });
-    return {
-      ok: true,
-      response,
-      tabId: tab.id,
-      activeTabUrl,
-      injected: Boolean(ready.injected)
-    };
-  } catch (error) {
-    const messageText = error && error.message ? error.message : "Content script message failed.";
-    await setStatus({
-      debug: {
-        activeTabUrl,
-        contentScriptStatus: "Message failed",
-        lastRuntimeMessage: message.type || "UNKNOWN",
-        lastError: messageText
-      }
-    });
-    return {
-      ok: false,
-      error: messageText,
-      tabId: tab.id,
-      activeTabUrl
-    };
-  }
+  await log("info", "profile_saved", { profileId: normalized.id, name: normalized.name });
+  return { ok: true, profile: normalized, profiles };
 }
 
-async function setAutomation(enabled) {
-  if (enabled) {
-    const credentials = await storageGet(VF_KEYS.credentials, null);
-    if (!hasCredentials(credentials)) {
-      await setStatus({
-        workflowState: VF_STATES.ERROR,
-        state: VF_STATE_LABELS.ERROR,
-        automationEnabled: false,
-        lastError: "Save contact number and password first.",
-        actionRequired: "Save credentials, then press Start Automation again.",
-        lastMessage: "Credentials are required before automation can start."
-      });
-      return {
-        ok: false,
-        error: "Save contact number and password first."
-      };
-    }
-  }
+async function deleteProfile(profileId) {
+  const state = await getAppState();
+  if (state.profiles.length <= 1) throw new Error("At least one profile must remain.");
+  const profiles = state.profiles.filter((profile) => profile.id !== profileId);
+  const activeProfileId = state.activeProfileId === profileId ? profiles[0]?.id || "" : state.activeProfileId;
+  await Storage.set({ [STORAGE_KEYS.PROFILES]: profiles, [STORAGE_KEYS.ACTIVE_PROFILE_ID]: activeProfileId });
+  await clearSchedulesForProfile(profileId);
+  await log("info", "profile_deleted", { profileId });
+  return { ok: true, profiles, activeProfileId };
+}
 
-  const settings = await setSettings({ automationEnabled: enabled });
-  await setStatus({
-    automationEnabled: enabled,
-    activeAutomationTabId: enabled ? null : null,
-    workflowState: VF_STATES.IDLE,
-    state: VF_STATE_LABELS.IDLE,
-    actionRequired: enabled
-      ? "Keep the IVAC tab open. VisaFlowX is starting observers."
-      : "Press Start Automation when ready.",
-    lastError: "",
-    lastMessage: enabled ? "Automation enabled" : "Automation stopped"
-  });
+async function setActiveProfile(profileId) {
+  const state = await getAppState();
+  const profile = state.profiles.find((item) => item.id === profileId);
+  if (!profile) throw new Error("Profile not found.");
+  await Storage.set({ [STORAGE_KEYS.ACTIVE_PROFILE_ID]: profileId });
+  await updateStatus({ activeProfileId: profileId, lastAction: `Active profile: ${profile.name}` });
+  return { ok: true, profile };
+}
 
-  if (!enabled) {
-    await sendToActiveIvAcTab({
-      type: "STOP_AUTOMATION",
-      settings
-    }).catch(() => null);
-    return {
-      ok: true,
-      settings
-    };
-  }
+function alarmName(scheduleId) {
+  return `vfu-schedule:${scheduleId}`;
+}
 
-  const tabResult = await sendToActiveIvAcTab({
-    type: "START_AUTOMATION",
-    settings
-  }, { injectIfMissing: enabled, requireSignin: true });
+function nextRunAt(runAt, recurring = "none") {
+  const input = new Date(runAt);
+  if (Number.isNaN(input.getTime())) throw new Error("Schedule date/time is invalid.");
+  let time = input.getTime();
+  const now = Date.now();
+  if (time > now || recurring === "none") return time;
+  const step = recurring === "weekly" ? 7 * 24 * 60 * 60 * 1000 : recurring === "hourly" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  while (time <= now) time += step;
+  return time;
+}
 
-  if (!tabResult.ok) {
-    await setSettings({ automationEnabled: false });
-    await setStatus({
-      workflowState: VF_STATES.ERROR,
-      state: VF_STATE_LABELS.ERROR,
-      automationEnabled: false,
-      lastError: tabResult.error,
-      actionRequired: "Open the IVAC sign-in page and press Start Automation.",
-      lastMessage: tabResult.error,
-      debug: {
-        activeTabUrl: tabResult.activeTabUrl || "",
-        contentScriptStatus: "Start failed",
-        lastRuntimeMessage: "START_AUTOMATION",
-        lastError: tabResult.error
-      }
-    });
-    return tabResult;
-  }
-
-  await setStatus({
-    automationEnabled: true,
-    activeAutomationTabId: tabResult.tabId,
-    scheduleEnabled: false,
-    scheduledAt: null,
-    lastMessage: "Automation running"
-  });
-
-  return {
-    ok: true,
-    settings,
-    tabId: tabResult.tabId,
-    activeTabUrl: tabResult.activeTabUrl,
-    injected: Boolean(tabResult.injected)
+async function saveSchedule(schedule) {
+  const state = await getAppState();
+  const profileId = schedule.profileId || state.activeProfileId;
+  const profile = state.profiles.find((item) => item.id === profileId);
+  if (!profile) throw new Error("Profile not found for schedule.");
+  const id = schedule.id || `schedule-${Date.now()}`;
+  const normalized = {
+    id,
+    profileId,
+    enabled: schedule.enabled !== false,
+    runAt: schedule.runAt,
+    recurring: schedule.recurring || "none",
+    nextRunAt: nextRunAt(schedule.runAt, schedule.recurring || "none")
   };
+  const schedules = state.schedules.some((item) => item.id === id)
+    ? state.schedules.map((item) => (item.id === id ? normalized : item))
+    : [...state.schedules, normalized];
+
+  await Storage.set({ [STORAGE_KEYS.SCHEDULES]: schedules });
+  await chrome.alarms.create(alarmName(id), {
+    when: normalized.nextRunAt,
+    periodInMinutes: normalized.recurring === "hourly" ? 60 : normalized.recurring === "daily" ? 1440 : normalized.recurring === "weekly" ? 10080 : undefined
+  });
+  await updateStatus({
+    state: STATE.SCHEDULED,
+    workflowStage: "Scheduled",
+    scheduledNextRunAt: normalized.nextRunAt,
+    lastAction: `Scheduled ${profile.name}`
+  });
+  await log("info", "schedule_saved", { schedule: normalized });
+  await notify("Workflow scheduled", `${profile.name} will start at ${new Date(normalized.nextRunAt).toLocaleString()}`);
+  return { ok: true, schedule: normalized, schedules };
 }
 
-async function startAutomationFromSchedule() {
-  const schedule = await getScheduleState();
-  await setScheduleState({
-    enabled: false,
-    scheduledAt: null,
-    lastStartedAt: Date.now(),
-    lastError: ""
-  });
-
-  await setStatus({
-    workflowState: VF_STATES.SCHEDULED,
-    state: VF_STATE_LABELS.SCHEDULED,
-    scheduleEnabled: false,
-    scheduledAt: null,
-    actionRequired: "Scheduled run started. Opening IVAC sign-in page.",
-    lastMessage: "Scheduled run started"
-  });
-
-  await notify(
-    "visaflowx-scheduled-started",
-    "VisaFlowX Scheduled Run Started",
-    "Opening the IVAC sign-in workflow now."
-  );
-
-  try {
-    const tab = await focusOrOpenSigninTab();
-    await setStatus({
-      debug: {
-        activeTabUrl: tab && tab.url ? tab.url : IVAC_SIGNIN_URL,
-        lastRuntimeMessage: "SCHEDULE_RUN"
-      }
-    });
-    const result = await setAutomation(true);
-    if (!result.ok) {
-      await setScheduleState({
-        ...schedule,
-        enabled: false,
-        scheduledAt: null,
-        lastStartedAt: Date.now(),
-        lastError: result.error || "Scheduled start failed."
-      });
-      await notify("visaflowx-schedule-error", "Scheduled Run Error", result.error || "Scheduled start failed.");
-    }
-    return result;
-  } catch (error) {
-    const message = error && error.message ? error.message : "Scheduled start failed.";
-    await setScheduleState({
-      enabled: false,
-      scheduledAt: null,
-      lastStartedAt: Date.now(),
-      lastError: message
-    });
-    await setStatus({
-      workflowState: VF_STATES.ERROR,
-      state: VF_STATE_LABELS.ERROR,
-      lastError: message,
-      actionRequired: "Open the IVAC sign-in page and start manually.",
-      lastMessage: message
-    });
-    await notify("visaflowx-schedule-error", "Scheduled Run Error", message);
-    return {
-      ok: false,
-      error: message
-    };
-  }
+async function clearSchedule(scheduleId) {
+  const state = await getAppState();
+  const schedules = scheduleId ? state.schedules.filter((item) => item.id !== scheduleId) : [];
+  const removed = scheduleId ? state.schedules.filter((item) => item.id === scheduleId) : state.schedules;
+  await Storage.set({ [STORAGE_KEYS.SCHEDULES]: schedules });
+  await Promise.all(removed.map((schedule) => chrome.alarms.clear(alarmName(schedule.id))));
+  await updateStatus({ scheduledNextRunAt: null, lastAction: "Schedule cleared", state: STATE.IDLE });
+  await log("info", "schedule_cleared", { scheduleId: scheduleId || "all" });
+  return { ok: true, schedules };
 }
 
-async function scheduleRun(scheduledAt) {
-  const when = Number(scheduledAt);
-  const credentials = await storageGet(VF_KEYS.credentials, null);
-  if (!hasCredentials(credentials)) {
-    const error = "Save contact number and password before scheduling.";
-    await setStatus({
-      workflowState: VF_STATES.ERROR,
-      state: VF_STATE_LABELS.ERROR,
-      lastError: error,
-      actionRequired: "Save credentials, then schedule the run.",
-      lastMessage: error
-    });
-    return { ok: false, error };
-  }
-
-  if (!Number.isFinite(when) || when <= Date.now() + 15000) {
-    const error = "Choose a future date and time at least 15 seconds from now.";
-    await setStatus({
-      workflowState: VF_STATES.ERROR,
-      state: VF_STATE_LABELS.ERROR,
-      lastError: error,
-      actionRequired: "Choose a valid future schedule time.",
-      lastMessage: error
-    });
-    return { ok: false, error };
-  }
-
-  await chrome.alarms.clear(SCHEDULE_ALARM_NAME);
-  await chrome.alarms.create(SCHEDULE_ALARM_NAME, { when });
-  const scheduleState = await setScheduleState({
-    enabled: true,
-    scheduledAt: when,
-    createdAt: Date.now(),
-    lastError: ""
-  });
-  await setStatus({
-    workflowState: VF_STATES.SCHEDULED,
-    state: VF_STATE_LABELS.SCHEDULED,
-    scheduleEnabled: true,
-    scheduledAt: when,
-    actionRequired: "No action required. VisaFlowX will start at the scheduled time.",
-    lastError: "",
-    lastMessage: `Scheduled run set for ${formatScheduleTime(when)}`
-  });
-  await notify(
-    "visaflowx-schedule-set",
-    "VisaFlowX Scheduled",
-    `Scheduled run set for ${formatScheduleTime(when)}`
-  );
-  return {
-    ok: true,
-    scheduleState
-  };
+async function clearSchedulesForProfile(profileId) {
+  const state = await getAppState();
+  const removed = state.schedules.filter((schedule) => schedule.profileId === profileId);
+  const schedules = state.schedules.filter((schedule) => schedule.profileId !== profileId);
+  await Storage.set({ [STORAGE_KEYS.SCHEDULES]: schedules });
+  await Promise.all(removed.map((schedule) => chrome.alarms.clear(alarmName(schedule.id))));
 }
 
-async function clearSchedule() {
-  await chrome.alarms.clear(SCHEDULE_ALARM_NAME);
-  const scheduleState = await setScheduleState({
-    enabled: false,
-    scheduledAt: null,
-    lastClearedAt: Date.now(),
-    lastError: ""
-  });
-  const status = await getStatus();
-  await setStatus({
-    workflowState: status.automationEnabled ? status.workflowState : VF_STATES.IDLE,
-    state: status.automationEnabled ? status.state : VF_STATE_LABELS.IDLE,
-    scheduleEnabled: false,
-    scheduledAt: null,
-    actionRequired: status.automationEnabled
-      ? status.actionRequired
-      : "Schedule cleared. Press Start Automation or schedule a new run.",
-    lastMessage: "Schedule cleared"
-  });
-  return {
-    ok: true,
-    scheduleState
-  };
+async function restoreSchedules() {
+  const state = await getAppState();
+  await Promise.all(state.schedules.filter((schedule) => schedule.enabled).map((schedule) => chrome.alarms.create(alarmName(schedule.id), {
+    when: nextRunAt(schedule.runAt, schedule.recurring),
+    periodInMinutes: schedule.recurring === "hourly" ? 60 : schedule.recurring === "daily" ? 1440 : schedule.recurring === "weekly" ? 10080 : undefined
+  })));
 }
 
-async function restoreScheduleAlarm() {
-  const scheduleState = await getScheduleState();
-  if (!scheduleState.enabled || !scheduleState.scheduledAt) {
-    return;
-  }
+async function startScheduledWorkflow(scheduleId) {
+  const state = await getAppState();
+  const schedule = state.schedules.find((item) => item.id === scheduleId);
+  if (!schedule?.enabled) return;
+  const profile = state.profiles.find((item) => item.id === schedule.profileId);
+  if (!profile) throw new Error("Scheduled profile was not found.");
 
-  if (scheduleState.scheduledAt <= Date.now()) {
-    await clearSchedule();
-    return;
-  }
+  let tab = null;
+  const tabs = await chrome.tabs.query({});
+  const pattern = profile.urlPatterns || [];
+  tab = tabs.find((item) => Parser.urlMatches(item.url || "", pattern)) || null;
 
-  await chrome.alarms.create(SCHEDULE_ALARM_NAME, { when: scheduleState.scheduledAt });
-  await setStatus({
-    workflowState: VF_STATES.SCHEDULED,
-    state: VF_STATE_LABELS.SCHEDULED,
-    scheduleEnabled: true,
-    scheduledAt: scheduleState.scheduledAt,
-    actionRequired: "No action required. VisaFlowX will start at the scheduled time.",
-    lastMessage: `Scheduled run restored for ${formatScheduleTime(scheduleState.scheduledAt)}`
-  });
-}
-
-async function sendCommandToIvAcTab(message) {
-  const tabResult = await sendToActiveIvAcTab(message, { injectIfMissing: true });
-  if (!tabResult.ok) {
-    await setStatus({
-      workflowState: VF_STATES.ERROR,
-      state: VF_STATE_LABELS.ERROR,
-      lastError: tabResult.error,
-      actionRequired: "Open the IVAC sign-in page and try again.",
-      lastMessage: tabResult.error
-    });
-    return tabResult;
-  }
-  return tabResult;
-}
-
-async function resetRuntimeAutomation(reason) {
-  const settings = await setSettings({ automationEnabled: false });
-  await setStatus({
-    workflowState: VF_STATES.IDLE,
-    state: VF_STATE_LABELS.IDLE,
-    automationEnabled: false,
-    timerStatus: "None",
-    retryEndsAt: null,
-    actionRequired: "Press Start Automation when ready.",
-    lastMessage: reason || "Automation is idle."
-  });
-  return settings;
-}
-
-async function scheduleRetry(tabId, seconds, reason) {
-  if (!tabId || !seconds || seconds < 1) {
-    return;
-  }
-
-  const when = Date.now() + seconds * 1000;
-  const alarmName = retryAlarmName(tabId);
-  await chrome.alarms.clear(alarmName);
-  await chrome.alarms.create(alarmName, { when });
-
-  const retryState = {
-    tabId,
-    alarmName,
-    retryEndsAt: when,
-    seconds,
-    reason: reason || "Cooldown detected"
-  };
-  await storageSet(VF_KEYS.retryState, retryState);
-  await setStatus({
-    workflowState: VF_STATES.RETRY_WAIT,
-    state: VF_STATE_LABELS.RETRY_WAIT,
-    timerStatus: "Running",
-    retryEndsAt: when,
-    actionRequired: "No action required. VisaFlowX will retry automatically.",
-    lastMessage: retryState.reason
-  });
-}
-
-async function cancelRetry(tabId) {
-  if (tabId) {
-    await chrome.alarms.clear(retryAlarmName(tabId));
+  if (tab?.id) {
+    await chrome.tabs.update(tab.id, { active: true, url: profile.startUrl || tab.url });
+    await chrome.windows.update(tab.windowId, { focused: true });
   } else {
-    const retryState = await storageGet(VF_KEYS.retryState, null);
-    if (retryState && retryState.alarmName) {
-      await chrome.alarms.clear(retryState.alarmName);
-    }
+    tab = await chrome.tabs.create({ url: profile.startUrl || "about:blank", active: true });
   }
 
-  await chrome.storage.local.remove(VF_KEYS.retryState);
-  await setStatus({
-    timerStatus: "None",
-    retryEndsAt: null,
-    actionRequired: "Retry timer reset.",
-    lastMessage: "Retry timer reset"
+  await updateStatus({
+    state: STATE.DETECTING,
+    workflowStage: "Scheduled launch",
+    lastAction: `Opening ${profile.name}`
   });
+
+  setTimeout(() => {
+    startMonitoring({ tabId: tab.id, profileId: profile.id, source: "schedule" }).catch((error) => {
+      updateStatus({ state: STATE.ERROR, lastError: error.message, monitoring: false });
+      log("error", "scheduled_start_failed", { error: error.message, scheduleId });
+      notify("Scheduled workflow failed", error.message);
+    });
+  }, 2500);
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
-  const settings = await getSettings();
-  await storageSet(VF_KEYS.settings, { ...settings, automationEnabled: false });
-  await setStatus({
-    ...DEFAULT_STATUS,
-    lastMessage: "VisaFlowX installed. Press Start Automation when ready."
+async function handleContentStatus(message, sender) {
+  const tab = sender.tab || {};
+  const status = await updateStatus({
+    ...message.status,
+    activeTabId: tab.id,
+    activeSite: tab.url ? new URL(tab.url).hostname : message.status?.activeSite,
+    updatedAt: new Date().toISOString()
   });
-  await restoreScheduleAlarm();
-});
+  return { ok: true, status };
+}
 
-chrome.runtime.onStartup.addListener(async () => {
-  await resetRuntimeAutomation("Browser started. Press Start Automation when ready.");
-  await restoreScheduleAlarm();
-});
-
-chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== "toggle-automation") {
-    return;
-  }
-  const settings = await getSettings();
-  const nextEnabled = !settings.automationEnabled;
-  await setAutomation(nextEnabled);
-  await notify(
-    "visaflowx-hotkey-toggle",
-    "VisaFlowX",
-    nextEnabled ? "Automation started" : "Automation stopped"
-  );
-});
-
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === SCHEDULE_ALARM_NAME) {
-    await startAutomationFromSchedule();
-    return;
-  }
-
-  if (!alarm.name.startsWith("visaflowx-retry-")) {
-    return;
-  }
-
-  const tabId = Number(alarm.name.replace("visaflowx-retry-", ""));
-  await chrome.storage.local.remove(VF_KEYS.retryState);
-  await setStatus({
-    workflowState: VF_STATES.IDLE,
-    state: VF_STATE_LABELS.IDLE,
-    timerStatus: "Retry ready",
-    retryEndsAt: null,
-    actionRequired: "No action required. VisaFlowX is retrying now.",
-    lastMessage: "Retry countdown finished"
+async function saveSelectedArea(message, sender) {
+  const state = await getAppState();
+  const profile = state.activeProfile;
+  if (!profile) throw new Error("No active profile to save the selected area.");
+  const updatedProfile = normalizeProfile({
+    ...profile,
+    monitorRegion: {
+      ...message.area,
+      url: sender.tab?.url || "",
+      savedAt: new Date().toISOString()
+    }
   });
+  await saveProfile(updatedProfile);
+  await updateStatus({ lastAction: "Monitoring area saved", selectedArea: updatedProfile.monitorRegion });
+  return { ok: true, area: updatedProfile.monitorRegion };
+}
 
-  if (tabId) {
-    await chrome.tabs.sendMessage(tabId, { type: "RETRY_ALARM_FIRED" }).catch(() => {});
+async function handleOtpDetected(message, sender) {
+  const tab = sender.tab || {};
+  const status = await updateStatus({
+    state: STATE.OTP_REQUIRED,
+    activeTabId: tab.id,
+    activeSite: tab.url ? new URL(tab.url).hostname : message.status?.activeSite,
+    currentUrl: tab.url || message.status?.currentUrl || "",
+    workflowStage: "OTP required",
+    currentRule: "",
+    retryCountdownEndsAt: null,
+    lastAction: "OTP page detected. Automation stopped for manual entry.",
+    lastError: "",
+    monitoring: false,
+    otpDetected: true
+  });
+  await log("warn", "otp_detected", {
+    tabId: tab.id || null,
+    reason: message.reason || "",
+    selector: message.selector || ""
+  });
+  await notify("OTP required", "Automation stopped. Enter the OTP manually to continue.");
+  return { ok: true, status };
+}
+
+async function handleRuntimeMessage(message, sender) {
+  switch (message?.type) {
+    case MESSAGE.GET_STATE: {
+      const state = await getAppState();
+      let activeTab = null;
+      try {
+        activeTab = await getActiveTab();
+      } catch (_) {}
+      return { ok: true, ...state, activeTab };
+    }
+    case MESSAGE.ENSURE_CONTENT: {
+      const tab = message.tabId ? await chrome.tabs.get(message.tabId) : await getActiveTab();
+      if (!tab?.id) throw new Error("No active tab found.");
+      return { ok: true, ...(await ensureContent(tab.id)) };
+    }
+    case MESSAGE.START:
+      return startMonitoring(message);
+    case MESSAGE.STOP:
+      return stopMonitoring(message);
+    case MESSAGE.SAVE_PROFILE:
+      return saveProfile(message.profile);
+    case MESSAGE.DELETE_PROFILE:
+      return deleteProfile(message.profileId);
+    case MESSAGE.SET_ACTIVE_PROFILE:
+      return setActiveProfile(message.profileId);
+    case MESSAGE.SCHEDULE_SAVE:
+      return saveSchedule(message.schedule);
+    case MESSAGE.SCHEDULE_CLEAR:
+      return clearSchedule(message.scheduleId);
+    case MESSAGE.STATUS_UPDATE:
+      return handleContentStatus(message, sender);
+    case MESSAGE.LOG_EVENT:
+      await appendLog(message.log || Logger.create("info", "unknown_event", {}));
+      return { ok: true };
+    case MESSAGE.AREA_SELECTED:
+      return saveSelectedArea(message, sender);
+    case MESSAGE.OTP_DETECTED:
+      return handleOtpDetected(message, sender);
+    case MESSAGE.START_AREA_SELECTOR: {
+      const tab = await getActiveTab();
+      if (!tab?.id) throw new Error("No active tab found.");
+      await ensureContent(tab.id);
+      await sendToTab(tab.id, { type: MESSAGE.START_AREA_SELECTOR });
+      return { ok: true };
+    }
+    case MESSAGE.RUN_RULE_ONCE: {
+      const tab = await getActiveTab();
+      if (!tab?.id) throw new Error("No active tab found.");
+      const state = await getAppState();
+      await ensureContent(tab.id);
+      await sendToTab(tab.id, { type: MESSAGE.RUN_RULE_ONCE, profile: state.activeProfile, ruleId: message.ruleId });
+      return { ok: true };
+    }
+    case MESSAGE.TEST_NOTIFICATION:
+      await notify("VisaFlowX Universal", "Notifications are working.");
+      return { ok: true };
+    case MESSAGE.CLEAR_LOGS:
+      await Storage.set({ [STORAGE_KEYS.LOGS]: [] });
+      return { ok: true };
+    case MESSAGE.EXPORT_PROFILES: {
+      const state = await getAppState();
+      return { ok: true, profiles: state.profiles };
+    }
+    case MESSAGE.IMPORT_PROFILES: {
+      const profiles = Array.isArray(message.profiles) ? message.profiles.map(normalizeProfile) : [];
+      if (!profiles.length) throw new Error("No profiles were provided.");
+      await Storage.set({ [STORAGE_KEYS.PROFILES]: profiles, [STORAGE_KEYS.ACTIVE_PROFILE_ID]: profiles[0].id });
+      await log("info", "profiles_imported", { count: profiles.length });
+      return { ok: true, profiles };
+    }
+    case MESSAGE.SET_SETTINGS: {
+      const state = await getAppState();
+      const settings = { ...state.settings, ...(message.settings || {}) };
+      await Storage.set({ [STORAGE_KEYS.SETTINGS]: settings });
+      await updateStatus({ lastAction: "Settings updated" });
+      return { ok: true, settings };
+    }
+    case MESSAGE.TEST_ALARM: {
+      const tab = await getActiveTab();
+      if (tab?.id) {
+        await ensureContent(tab.id);
+        await sendToTab(tab.id, { type: MESSAGE.TEST_ALARM });
+      }
+      return { ok: true };
+    }
+    case MESSAGE.STOP_ALARM: {
+      const tab = await getActiveTab();
+      if (tab?.id) {
+        await sendToTab(tab.id, { type: MESSAGE.STOP_ALARM }).catch(() => {});
+      }
+      return { ok: true };
+    }
+    default:
+      throw new Error(`Unknown message type: ${message?.type || "empty"}`);
   }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  Storage.ensureDefaults()
+    .then(restoreSchedules)
+    .then(() => log("info", "extension_installed", { version: chrome.runtime.getManifest().version }))
+    .catch((error) => console.error(error));
 });
 
-chrome.tabs.onRemoved.addListener(async (tabId) => {
-  const status = await getStatus();
-  if (!status.automationEnabled || status.activeAutomationTabId !== tabId) {
-    return;
-  }
-
-  await setSettings({ automationEnabled: false });
-  await setStatus({
-    workflowState: VF_STATES.IDLE,
-    state: VF_STATE_LABELS.IDLE,
-    automationEnabled: false,
-    activeAutomationTabId: null,
-    actionRequired: "Automation stopped because the IVAC tab was closed.",
-    lastMessage: "Automation Stopped",
-    lastError: ""
-  });
+chrome.runtime.onStartup.addListener(() => {
+  Storage.ensureDefaults()
+    .then(restoreSchedules)
+    .catch((error) => console.error(error));
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  (async () => {
-    switch (message && message.type) {
-      case "GET_STATE": {
-        const activeTab = await getActiveTab();
-        const status = await getStatus();
-        sendResponse({
-          settings: await getSettings(),
-          status: {
-            ...status,
-            debug: {
-              ...(status.debug || DEFAULT_STATUS.debug),
-              activeTabUrl: activeTab && activeTab.url ? activeTab.url : ""
-            }
-          },
-          retryState: await storageGet(VF_KEYS.retryState, null),
-          scheduleState: await getScheduleState()
-        });
-        break;
-      }
-
-      case "SAVE_SETTINGS": {
-        const settings = await setSettings(message.settings || {});
-        sendResponse({ ok: true, settings });
-        break;
-      }
-
-      case "START_AUTOMATION": {
-        const result = await setAutomation(true);
-        sendResponse(result);
-        break;
-      }
-
-      case "SCHEDULE_RUN": {
-        const result = await scheduleRun(message.scheduledAt);
-        sendResponse(result);
-        break;
-      }
-
-      case "CLEAR_SCHEDULE": {
-        const result = await clearSchedule();
-        sendResponse(result);
-        break;
-      }
-
-      case "STOP_AUTOMATION": {
-        const result = await setAutomation(false);
-        sendResponse(result.ok === false ? result : { ok: true, settings: result.settings });
-        break;
-      }
-
-      case "TEST_DETECTION":
-      case "TEST_AUTOFILL": {
-        const result = await sendCommandToIvAcTab(message);
-        sendResponse(result.ok ? { ok: true, response: result.response } : result);
-        break;
-      }
-
-      case "STATUS_UPDATE": {
-        const status = await setStatus(message.status || {});
-        sendResponse({ ok: true, status });
-        break;
-      }
-
-      case "CONTENT_READY": {
-        const senderUrl = sender && sender.tab && sender.tab.url ? sender.tab.url : "";
-        const status = await setStatus({
-          currentPage: message.page || "UNKNOWN_PAGE",
-          workflowState: message.workflowState || VF_STATES.IDLE,
-          state: VF_STATE_LABELS[message.workflowState] || VF_STATE_LABELS.IDLE,
-          debug: {
-            activeTabUrl: senderUrl,
-            injectionSuccess: true,
-            detectorState: message.page || "UNKNOWN_PAGE",
-            workflowState: message.workflowState || VF_STATES.IDLE,
-            contentScriptStatus: "Ready",
-            lastRuntimeMessage: "CONTENT_READY",
-            lastError: ""
-          },
-          lastMessage: "Content script ready"
-        });
-        sendResponse({ ok: true, status });
-        break;
-      }
-
-      case "SHOW_NOTIFICATION": {
-        await notify(message.id, message.title || "VisaFlowX", message.message || "");
-        sendResponse({ ok: true });
-        break;
-      }
-
-      case "PLAY_ALARM": {
-        await playAlarm({ sound: message.sound });
-        await storageSet(VF_KEYS.notificationState, {
-          alarmPlaying: true,
-          updatedAt: Date.now()
-        });
-        sendResponse({ ok: true });
-        break;
-      }
-
-      case "STOP_ALARM": {
-        await stopAlarm();
-        await storageSet(VF_KEYS.notificationState, {
-          alarmPlaying: false,
-          updatedAt: Date.now()
-        });
-        sendResponse({ ok: true });
-        break;
-      }
-
-      case "UPDATE_SOUND": {
-        const sound = await updateAlarmSound(message.sound || {});
-        sendResponse({ ok: true, sound });
-        break;
-      }
-
-      case "TEST_ALARM": {
-        await playAlarm({ sound: message.sound });
-        setTimeout(() => {
-          stopAlarm();
-        }, 2500);
-        sendResponse({ ok: true });
-        break;
-      }
-
-      case "TEST_NOTIFICATIONS": {
-        await notify(
-          "visaflowx-test-notification",
-          "VisaFlowX Test Notification",
-          "Notifications are working."
-        );
-        sendResponse({ ok: true });
-        break;
-      }
-
-      case "SCHEDULE_RETRY": {
-        const tabId = sender && sender.tab && sender.tab.id;
-        await scheduleRetry(tabId, Number(message.seconds), message.reason);
-        if (message.notify !== false) {
-          await notify(
-            "visaflowx-retry",
-            "VisaFlowX Retry Started",
-            message.reason || "Retry countdown started"
-          );
-        }
-        sendResponse({ ok: true });
-        break;
-      }
-
-      case "CANCEL_RETRY": {
-        const tabId = sender && sender.tab && sender.tab.id;
-        await cancelRetry(tabId);
-        sendResponse({ ok: true });
-        break;
-      }
-
-      default:
-        sendResponse({ ok: false, error: "Unknown message type" });
-    }
-  })().catch((error) => {
-    sendResponse({
-      ok: false,
-      error: error && error.message ? error.message : "Unknown error"
+  handleRuntimeMessage(message, sender)
+    .then((response) => sendResponse(response))
+    .catch(async (error) => {
+      await updateStatus({
+        state: STATE.ERROR,
+        lastError: error.message,
+        workflowStage: "Error"
+      }).catch(() => {});
+      await log("error", "runtime_error", { message: error.message, type: message?.type }).catch(() => {});
+      sendResponse({ ok: false, error: error.message });
     });
-  });
   return true;
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== "toggle-monitoring") return;
+  getAppState()
+    .then((state) => (state.status.monitoring ? stopMonitoring({ reason: "hotkey" }) : startMonitoring({ source: "hotkey" })))
+    .catch((error) => {
+      updateStatus({ state: STATE.ERROR, lastError: error.message, workflowStage: "Error" });
+      notify("VisaFlowX Universal error", error.message);
+    });
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (!alarm.name.startsWith("vfu-schedule:")) return;
+  startScheduledWorkflow(alarm.name.replace("vfu-schedule:", "")).catch((error) => {
+    updateStatus({ state: STATE.ERROR, lastError: error.message, workflowStage: "Error", monitoring: false });
+    notify("Scheduled workflow failed", error.message);
+  });
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  getAppState().then((state) => {
+    if (state.status.activeTabId === tabId && state.status.monitoring) {
+      updateStatus({
+        state: STATE.STOPPED,
+        monitoring: false,
+        workflowStage: "Stopped",
+        lastAction: "Automation stopped because the tab was closed"
+      });
+      log("info", "tab_closed_stop", { tabId });
+    }
+  }).catch(() => {});
 });

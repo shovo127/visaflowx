@@ -1,203 +1,87 @@
-"use strict";
+(function initStorage(global) {
+  "use strict";
 
-window.VisaFlowXStorage = (() => {
-  const KEYS = {
-    credentials: "visaflowx.credentials",
-    settings: "visaflowx.settings",
-    status: "visaflowx.status",
-    retryState: "visaflowx.retryState",
-    scheduleState: "visaflowx.scheduleState",
-    notificationState: "visaflowx.notificationState"
-  };
+  const Constants = global.VisaFlowXUniversal?.Constants || {};
+  const memoryStore = new Map();
 
-  const DEFAULT_SETTINGS = {
-    automationEnabled: false,
-    delayMode: "balanced",
-    delays: {
-      fast: {
-        autofill: 120,
-        signIn: 450,
-        retryBuffer: 1000,
-        domWait: 300
-      },
-      balanced: {
-        autofill: 250,
-        signIn: 900,
-        retryBuffer: 2000,
-        domWait: 600
-      },
-      safe: {
-        autofill: 500,
-        signIn: 1500,
-        retryBuffer: 3500,
-        domWait: 1000
+  function hasChromeStorage() {
+    return Boolean(global.chrome?.storage?.local);
+  }
+
+  async function get(keys) {
+    if (!hasChromeStorage()) {
+      if (Array.isArray(keys)) {
+        return Object.fromEntries(keys.map((key) => [key, memoryStore.get(key)]));
       }
-    },
-    sound: {
-      volume: 1,
-      muted: false
-    },
-    notifications: {
-      otp: true,
-      retry: true,
-      captcha: true,
-      errors: true,
-      login: true
-    }
-  };
-
-  const DEFAULT_STATUS = {
-    workflowState: "IDLE",
-    state: "Idle",
-    actionRequired: "Press Start Automation when ready.",
-    currentPage: "Unknown",
-    automationEnabled: false,
-    activeAutomationTabId: null,
-    timerStatus: "None",
-    retryEndsAt: null,
-    lastLoginAttempt: null,
-    scheduleEnabled: false,
-    scheduledAt: null,
-    captchaState: "Unknown",
-    otpDetected: false,
-    lastError: "",
-    debug: {
-      activeTabUrl: "",
-      injectionSuccess: false,
-      detectorState: "Unknown",
-      workflowState: "IDLE",
-      contentScriptStatus: "Not checked",
-      lastRuntimeMessage: "",
-      lastError: ""
-    },
-    lastEventAt: null,
-    lastMessage: "Ready"
-  };
-
-  const DEFAULT_SCHEDULE_STATE = {
-    enabled: false,
-    scheduledAt: null,
-    createdAt: null,
-    lastStartedAt: null,
-    lastClearedAt: null,
-    lastError: ""
-  };
-
-  function mergeDeep(base, patch) {
-    if (!patch || typeof patch !== "object") {
-      return base;
-    }
-
-    const output = Array.isArray(base) ? [...base] : { ...base };
-    Object.keys(patch).forEach((key) => {
-      const value = patch[key];
-      if (
-        value &&
-        typeof value === "object" &&
-        !Array.isArray(value) &&
-        base &&
-        typeof base[key] === "object" &&
-        !Array.isArray(base[key])
-      ) {
-        output[key] = mergeDeep(base[key], value);
-        return;
+      if (typeof keys === "string") return { [keys]: memoryStore.get(keys) };
+      if (keys && typeof keys === "object") {
+        return Object.fromEntries(Object.entries(keys).map(([key, fallback]) => [key, memoryStore.has(key) ? memoryStore.get(key) : fallback]));
       }
-      output[key] = value;
+      return Object.fromEntries(memoryStore.entries());
+    }
+    return chrome.storage.local.get(keys);
+  }
+
+  async function set(values) {
+    if (!hasChromeStorage()) {
+      Object.entries(values || {}).forEach(([key, value]) => memoryStore.set(key, value));
+      return;
+    }
+    return chrome.storage.local.set(values);
+  }
+
+  async function remove(keys) {
+    if (!hasChromeStorage()) {
+      (Array.isArray(keys) ? keys : [keys]).forEach((key) => memoryStore.delete(key));
+      return;
+    }
+    return chrome.storage.local.remove(keys);
+  }
+
+  async function ensureDefaults() {
+    const { STORAGE_KEYS, DEFAULT_PROFILES, DEFAULT_SETTINGS } = Constants;
+    const current = await get({
+      [STORAGE_KEYS.PROFILES]: null,
+      [STORAGE_KEYS.ACTIVE_PROFILE_ID]: null,
+      [STORAGE_KEYS.SETTINGS]: null,
+      [STORAGE_KEYS.STATUS]: null,
+      [STORAGE_KEYS.LOGS]: [],
+      [STORAGE_KEYS.SCHEDULES]: []
     });
-    return output;
-  }
 
-  async function get(key, fallback) {
-    const data = await chrome.storage.local.get(key);
-    return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : fallback;
-  }
-
-  async function set(key, value) {
-    await chrome.storage.local.set({ [key]: value });
-    return value;
-  }
-
-  async function remove(key) {
-    await chrome.storage.local.remove(key);
-  }
-
-  async function getCredentials() {
-    return get(KEYS.credentials, {
-      contactNumber: "",
-      password: "",
-      updatedAt: null
-    });
-  }
-
-  async function saveCredentials(credentials) {
-    const safeCredentials = {
-      contactNumber: String(credentials.contactNumber || "").trim(),
-      password: String(credentials.password || ""),
+    const profiles = current[STORAGE_KEYS.PROFILES] || DEFAULT_PROFILES || [];
+    const activeProfileId = current[STORAGE_KEYS.ACTIVE_PROFILE_ID] || profiles[0]?.id || "";
+    const settings = { ...(DEFAULT_SETTINGS || {}), ...(current[STORAGE_KEYS.SETTINGS] || {}) };
+    const status = current[STORAGE_KEYS.STATUS] || {
+      state: "IDLE",
+      activeSite: "",
+      workflowStage: "Idle",
+      currentRule: "",
+      retryCountdownEndsAt: null,
+      lastAction: "Ready",
+      lastError: "",
+      monitoring: false,
+      protectedChallenge: false,
       updatedAt: new Date().toISOString()
     };
-    return set(KEYS.credentials, safeCredentials);
+
+    await set({
+      [STORAGE_KEYS.PROFILES]: profiles,
+      [STORAGE_KEYS.ACTIVE_PROFILE_ID]: activeProfileId,
+      [STORAGE_KEYS.SETTINGS]: settings,
+      [STORAGE_KEYS.STATUS]: status,
+      [STORAGE_KEYS.LOGS]: current[STORAGE_KEYS.LOGS] || [],
+      [STORAGE_KEYS.SCHEDULES]: current[STORAGE_KEYS.SCHEDULES] || []
+    });
+
+    return { profiles, activeProfileId, settings, status, logs: current[STORAGE_KEYS.LOGS] || [], schedules: current[STORAGE_KEYS.SCHEDULES] || [] };
   }
 
-  async function deleteCredentials() {
-    await remove(KEYS.credentials);
-  }
+  const Storage = Object.freeze({ ensureDefaults, get, remove, set });
 
-  async function getSettings() {
-    const saved = await get(KEYS.settings, {});
-    return mergeDeep(DEFAULT_SETTINGS, saved || {});
-  }
+  global.VisaFlowXUniversal = Object.assign(global.VisaFlowXUniversal || {}, { Storage });
 
-  async function saveSettings(patch) {
-    const current = await getSettings();
-    const next = mergeDeep(current, patch || {});
-    return set(KEYS.settings, next);
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = Storage;
   }
-
-  async function getStatus() {
-    const saved = await get(KEYS.status, {});
-    return mergeDeep(DEFAULT_STATUS, saved || {});
-  }
-
-  async function saveStatus(patch) {
-    const current = await getStatus();
-    const next = {
-      ...current,
-      ...(patch || {}),
-      lastEventAt: new Date().toISOString()
-    };
-    return set(KEYS.status, next);
-  }
-
-  async function getRetryState() {
-    return get(KEYS.retryState, null);
-  }
-
-  async function getScheduleState() {
-    const saved = await get(KEYS.scheduleState, {});
-    return mergeDeep(DEFAULT_SCHEDULE_STATE, saved || {});
-  }
-
-  async function clearRetryState() {
-    await remove(KEYS.retryState);
-  }
-
-  return {
-    KEYS,
-    DEFAULT_SETTINGS,
-    DEFAULT_STATUS,
-    DEFAULT_SCHEDULE_STATE,
-    get,
-    set,
-    remove,
-    getCredentials,
-    saveCredentials,
-    deleteCredentials,
-    getSettings,
-    saveSettings,
-    getStatus,
-    saveStatus,
-    getRetryState,
-    getScheduleState,
-    clearRetryState
-  };
-})();
+})(typeof globalThis !== "undefined" ? globalThis : this);
