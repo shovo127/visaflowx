@@ -1,0 +1,65 @@
+{
+  "manifest_version": 3,
+  "name": "VisaFlowX",
+  "version": "1.0.0",
+  "description": "Safe IVAC Bangladesh appointment login workflow helper with credential autofill, captcha wait, retry countdowns, and OTP alarm.",
+  "permissions": [
+    "storage",
+    "notifications",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "alarms",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "https://appointment.ivacbd.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "VisaFlowX",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
+    }
+  },
+  "commands": {
+    "toggle-automation": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L"
+      },
+      "description": "Start or stop VisaFlowX automation"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://appointment.ivacbd.com/*"
+      ],
+      "js": [
+        "utils/constants.js",
+        "utils/logger.js",
+        "utils/storage.js",
+        "utils/timers.js",
+        "utils/dom-utils.js",
+        "utils/parser.js",
+        "content/notification-handler.js",
+        "content/detector.js",
+        "content/autofill.js",
+        "content/retry-engine.js",
+        "content/otp-monitor.js",
+        "content/automation.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

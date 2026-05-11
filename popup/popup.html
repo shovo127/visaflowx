@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VisaFlowX</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="app-shell" aria-live="polite">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">IVAC workflow assistant</p>
+          <h1>VisaFlowX</h1>
+        </div>
+        <span id="automationBadge" class="state-badge" aria-label="Current automation state">Idle</span>
+      </header>
+
+      <section class="hero-card" aria-labelledby="quickActionsTitle">
+        <div class="hero-copy">
+          <h2 id="quickActionsTitle">Quick Actions</h2>
+          <p id="primaryStatusText">Ready to automate IVAC login workflow.</p>
+        </div>
+        <div class="primary-actions">
+          <button id="startAutomation" class="start-button" type="button" aria-label="Start automation">
+            <span>Start Automation</span>
+          </button>
+          <button id="stopAutomation" class="stop-button" type="button" aria-label="Stop automation">Stop</button>
+        </div>
+        <div class="hint-row">
+          <span>Hotkey</span>
+          <strong>Ctrl + Shift + L</strong>
+        </div>
+      </section>
+
+      <section class="card status-card" aria-labelledby="automationStatusTitle">
+        <div class="section-heading">
+          <h2 id="automationStatusTitle">Automation Status</h2>
+          <span id="actionRequired" class="action-pill">Press Start Automation when ready.</span>
+        </div>
+        <ol id="workflowStages" class="workflow-list" aria-label="Automation workflow stages"></ol>
+      </section>
+
+      <section class="card credentials-card" aria-labelledby="credentialsTitle">
+        <div class="section-heading">
+          <h2 id="credentialsTitle">Credentials</h2>
+          <span id="credentialBadge" class="mini-badge">Not saved</span>
+        </div>
+        <label for="contactNumber">Contact Number</label>
+        <input id="contactNumber" type="text" inputmode="numeric" autocomplete="username" placeholder="01XXXXXXXXX" aria-describedby="credentialHelp">
+
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="Password">
+
+        <p id="credentialHelp" class="helper-text">Credentials are stored in Chrome extension local storage and never printed in logs.</p>
+
+        <div class="button-row">
+          <button id="saveCredentials" class="solid-button" type="button">Save</button>
+          <button id="testAutofill" class="ghost-button" type="button">Test Autofill</button>
+          <button id="deleteCredentials" class="ghost-button danger" type="button">Delete</button>
+        </div>
+      </section>
+
+      <section class="card monitor-card" aria-labelledby="liveMonitorTitle">
+        <div class="section-heading">
+          <h2 id="liveMonitorTitle">Live Monitor</h2>
+          <button id="testDetection" class="icon-button" type="button" aria-label="Test page detection">Test</button>
+        </div>
+        <div class="monitor-grid">
+          <div>
+            <span>Current page</span>
+            <strong id="currentPage">Unknown</strong>
+          </div>
+          <div>
+            <span>State</span>
+            <strong id="statusState">Idle</strong>
+          </div>
+          <div>
+            <span>Captcha</span>
+            <strong id="captchaState">Unknown</strong>
+          </div>
+          <div>
+            <span>OTP</span>
+            <strong id="otpState">No</strong>
+          </div>
+          <div class="wide">
+            <span>Last action</span>
+            <strong id="lastMessage">Ready</strong>
+          </div>
+          <div class="wide error-row">
+            <span>Last error</span>
+            <strong id="lastError">None</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="card retry-card" aria-labelledby="retryTitle">
+        <div class="section-heading">
+          <h2 id="retryTitle">Retry Timer</h2>
+          <button id="resetTimers" class="ghost-button compact" type="button">Reset</button>
+        </div>
+        <div class="retry-display">
+          <strong id="timerStatus">None</strong>
+          <span id="retryEndsAt">No retry scheduled</span>
+        </div>
+      </section>
+
+      <section class="card notification-card" aria-labelledby="notificationsTitle">
+        <div class="section-heading">
+          <h2 id="notificationsTitle">Notifications</h2>
+          <span id="notificationState" class="mini-badge">Ready</span>
+        </div>
+        <label class="range-label" for="volume">
+          <span>Alarm Volume</span>
+          <input id="volume" type="range" min="0" max="100" value="100">
+        </label>
+        <label class="toggle">
+          <input id="mute" type="checkbox">
+          <span>Mute alarm</span>
+        </label>
+        <div class="button-row two">
+          <button id="testSound" class="ghost-button" type="button">Test Sound</button>
+          <button id="stopAlarm" class="solid-button secondary" type="button">Stop Alarm</button>
+        </div>
+      </section>
+
+      <details class="accordion">
+        <summary>Advanced Settings</summary>
+        <section class="card advanced-card">
+          <div class="section-heading">
+            <h2>Delay Settings</h2>
+            <span id="delayModeLabel" class="mini-badge">Balanced</span>
+          </div>
+          <div class="segmented" role="group" aria-label="Delay mode">
+            <button data-delay-mode="fast" type="button">Fast</button>
+            <button data-delay-mode="balanced" type="button">Balanced</button>
+            <button data-delay-mode="safe" type="button">Safe</button>
+          </div>
+          <div class="delay-grid">
+            <label for="autofillDelay">
+              Autofill delay
+              <input id="autofillDelay" type="number" min="0" step="50">
+            </label>
+            <label for="signInDelay">
+              Sign-in delay
+              <input id="signInDelay" type="number" min="0" step="50">
+            </label>
+            <label for="retryDelay">
+              Retry buffer
+              <input id="retryDelay" type="number" min="0" step="100">
+            </label>
+            <label for="domWaitDelay">
+              DOM wait
+              <input id="domWaitDelay" type="number" min="100" step="50">
+            </label>
+          </div>
+          <button id="saveDelays" class="ghost-button full" type="button">Save Delay Values</button>
+          <p class="safe-note">
+            Cloudflare is never bypassed. VisaFlowX only detects, focuses, waits for human verification, then continues.
+          </p>
+        </section>
+      </details>
+    </main>
+
+    <script src="../utils/constants.js"></script>
+    <script src="../utils/storage.js"></script>
+    <script src="../utils/timers.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

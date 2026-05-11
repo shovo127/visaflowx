@@ -1,0 +1,66 @@
+"use strict";
+
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+
+const root = path.resolve(__dirname, "..");
+const sourceDirs = ["background", "content", "popup", "utils"];
+const jsFiles = [];
+
+function walk(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walk(full);
+    } else if (entry.name.endsWith(".js")) {
+      jsFiles.push(full);
+    }
+  }
+}
+
+for (const dir of sourceDirs) {
+  walk(path.join(root, dir));
+}
+
+for (const file of jsFiles) {
+  const source = fs.readFileSync(file, "utf8");
+  assert(!/\beval\s*\(/.test(source), `Unsafe eval found in ${file}`);
+  assert(!/password\s*[:=]\s*console/i.test(source), `Sensitive logging risk in ${file}`);
+}
+
+const automation = fs.readFileSync(path.join(root, "content", "automation.js"), "utf8");
+assert(automation.includes("MutationObserver"), "Automation must use MutationObserver");
+assert(automation.includes("AutomationController"), "Automation must use centralized controller");
+for (const state of [
+  "IDLE",
+  "PAGE_DETECTED",
+  "AUTOFILLING",
+  "WAITING_FOR_VERIFICATION",
+  "VERIFICATION_COMPLETE",
+  "SIGNING_IN",
+  "OTP_DETECTED",
+  "RETRY_WAIT",
+  "ERROR"
+]) {
+  assert(automation.includes(state), `Missing workflow state: ${state}`);
+}
+
+const popupHtml = fs.readFileSync(path.join(root, "popup", "popup.html"), "utf8");
+for (const requiredText of [
+  "Start Automation",
+  "Test Autofill",
+  "Automation Status",
+  "Live Monitor",
+  "Retry Timer",
+  "Notifications",
+  "Advanced Settings"
+]) {
+  assert(popupHtml.includes(requiredText), `Missing popup UI text: ${requiredText}`);
+}
+
+const serviceWorker = fs.readFileSync(path.join(root, "background", "service-worker.js"), "utf8");
+assert(serviceWorker.includes("chrome.runtime.onStartup"), "Startup must reset automation state");
+assert(serviceWorker.includes("injectContentScripts"), "Start flow must inject content scripts if missing");
+
+console.log("source-static.test.js passed");
