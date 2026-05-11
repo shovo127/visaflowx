@@ -14,10 +14,10 @@ It is intentionally not universal. The runtime only targets `https://appointment
 - Verification wait mode that highlights the visible verification widget and waits for manual completion.
 - Automatic Sign In click only after verification is no longer visible or not required.
 - OTP detection that stops automation, focuses the OTP field, starts a looping alarm, and sends a desktop notification.
-- Retry countdown parsing for messages such as `Try again after 5 minutes` and `Please wait`.
+- Continuous retry countdown parsing for messages such as `Try again after 5 minutes` and `Please wait`.
 - Error recovery for 404, timeout, blank, temporary error, and session-expired pages.
-- Scheduler powered by `chrome.alarms`.
-- Compact dark popup UI with dashboard, credentials, scheduler, automation status, notifications, and settings.
+- Scheduler powered by `chrome.alarms` with separate date/time controls and restore on browser restart.
+- Compact dark popup UI with live status, credential save/update/clear, scheduler preview, notifications, alarm controls, and toast feedback.
 
 ## Safety Boundary
 
@@ -37,6 +37,10 @@ Blocked behavior:
 - No hidden challenge clicking.
 - No anti-bot evasion.
 - No OTP reading or auto-submit.
+
+## Retry Behavior
+
+VisaFlowX retries continuously until an OTP page appears or the user manually stops automation. There is no max retry attempt limit.
 
 ## Installation
 

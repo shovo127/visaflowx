@@ -29,7 +29,7 @@
   function nextRetryDelay(attempt, retry = {}) {
     const baseDelayMs = Number(retry.baseDelayMs || 15000);
     const maxDelayMs = Number(retry.maxDelayMs || 180000);
-    const multiplier = Math.max(1, Number(attempt || 1));
+    const multiplier = Math.max(1, Math.min(12, Number(attempt || 1)));
     return Math.min(maxDelayMs, baseDelayMs * multiplier);
   }
 

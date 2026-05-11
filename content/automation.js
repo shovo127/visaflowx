@@ -40,7 +40,7 @@
       this.retryEngine.reset();
       this.observe();
       await this.updateStatus({
-        state: "DETECTING_PAGE",
+        state: "RUNNING",
         page: location.href,
         verificationState: "Checking",
         otpState: "Idle",
@@ -122,7 +122,7 @@
       }
 
       await this.updateStatus({
-        state: "AUTOFILLING",
+        state: "RUNNING",
         verificationState: pageState.verification.present ? "Visible" : "Not visible",
         lastAction: "Credentials autofilled",
         lastError: ""
@@ -135,7 +135,7 @@
       DomUtils.focusElement(pageState.verification.element);
       DomUtils.pulseHighlight(pageState.verification.element);
       await this.updateStatus({
-        state: "WAITING_FOR_VERIFICATION",
+        state: "WAITING_VERIFICATION",
         verificationState: "Waiting for manual completion",
         lastAction: "Verification detected. Complete it manually.",
         lastError: ""
@@ -146,7 +146,7 @@
       const button = pageState.signInButton;
       if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") {
         await this.updateStatus({
-          state: "DETECTING_PAGE",
+          state: "RUNNING",
           lastAction: "Waiting for Sign In button",
           lastError: ""
         });
@@ -159,7 +159,7 @@
       await Timers.sleep(120);
       button.click();
       await this.updateStatus({
-        state: "SIGNING_IN",
+        state: "RUNNING",
         verificationState: this.verificationSeen ? "Completed or no longer visible" : "Not required",
         lastAction: "Sign In clicked",
         lastError: ""
@@ -200,7 +200,7 @@
 
       if (pageState.type !== "signin") {
         await this.updateStatus({
-          state: "DETECTING_PAGE",
+          state: "RUNNING",
           lastAction: source === "start" ? "Waiting for IVAC signin page" : "Detecting IVAC page",
           lastError: pageState.type === "unsupported" ? "Open https://appointment.ivacbd.com/signin" : ""
         });

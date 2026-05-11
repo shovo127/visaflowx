@@ -23,7 +23,7 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">IVAC workflow assistant</p>
+          <p class="eyebrow">IVAC signin automation</p>
           <h1>VisaFlowX</h1>
         </div>
         <span id="stateBadge" class="state-badge idle">Idle</span>
@@ -33,21 +33,26 @@
         <div class="section-title">
           <svg><use href="#i-dashboard"></use></svg>
           <h2 id="dashboardTitle">Dashboard</h2>
+          <span class="mini-badge">Automation Status</span>
         </div>
         <div class="status-grid">
-          <article><span>Current Page</span><strong id="currentPage">-</strong></article>
-          <article><span>Retry Countdown</span><strong id="retryCountdown">-</strong></article>
+          <article><span>Automation</span><strong id="stateText">Idle</strong></article>
+          <article><span>Retry</span><strong id="retryCountdown">-</strong></article>
           <article><span>Verification</span><strong id="verificationState">Idle</strong></article>
           <article><span>OTP</span><strong id="otpState">Idle</strong></article>
           <article><span>Scheduler</span><strong id="schedulerState">Not scheduled</strong></article>
-          <article><span>Last Action</span><strong id="lastAction">Ready</strong></article>
+          <article><span>Page</span><strong id="currentPage">-</strong></article>
+        </div>
+        <div class="last-action">
+          <span id="lastAction">Ready</span>
+          <small id="lastError">-</small>
         </div>
       </section>
 
-      <section class="panel actions" aria-label="Quick Actions">
+      <section class="panel quick-actions" aria-label="Quick Actions">
         <button id="startBtn" class="btn primary" type="button"><svg><use href="#i-play"></use></svg>Start Automation</button>
         <button id="stopBtn" class="btn secondary" type="button"><svg><use href="#i-stop"></use></svg>Stop Automation</button>
-        <button id="saveCredentialsBtn" class="btn secondary" type="button"><svg><use href="#i-save"></use></svg>Save Credentials</button>
+        <button id="quickSaveBtn" class="btn secondary" type="button"><svg><use href="#i-save"></use></svg>Save Credentials</button>
         <button id="scheduleBtn" class="btn secondary" type="button"><svg><use href="#i-clock"></use></svg>Schedule Run</button>
         <button id="testNotificationBtn" class="btn ghost" type="button"><svg><use href="#i-bell"></use></svg>Test Notification</button>
       </section>
@@ -56,6 +61,7 @@
         <div class="section-title">
           <svg><use href="#i-key"></use></svg>
           <h2 id="credentialsTitle">Credentials</h2>
+          <span id="credentialState" class="mini-badge">Not saved</span>
         </div>
         <div class="form-grid">
           <label>
@@ -67,7 +73,11 @@
             <input id="password" type="password" autocomplete="current-password">
           </label>
         </div>
-        <p class="hint">Stored in Chrome local extension storage and never logged or sent anywhere except the IVAC page fields.</p>
+        <div class="button-row three">
+          <button id="saveCredentialsBtn" class="btn primary" type="button">Save Credentials</button>
+          <button id="updateCredentialsBtn" class="btn secondary" type="button">Update</button>
+          <button id="clearCredentialsBtn" class="btn ghost" type="button">Clear</button>
+        </div>
       </section>
 
       <section class="panel" aria-labelledby="schedulerTitle">
@@ -75,34 +85,31 @@
           <svg><use href="#i-clock"></use></svg>
           <h2 id="schedulerTitle">Scheduler</h2>
         </div>
-        <div class="form-grid">
+        <div class="form-grid scheduler-grid">
           <label>
-            Start Time
-            <input id="scheduleRunAt" type="datetime-local">
+            Date
+            <input id="scheduleDate" type="date">
+          </label>
+          <label>
+            Time
+            <input id="scheduleTime" type="time">
           </label>
           <label class="switch-row">
             <input id="scheduleEnabled" type="checkbox">
-            <span>Enable scheduled automation</span>
+            <span>Enable Scheduler</span>
           </label>
         </div>
-        <button id="clearScheduleBtn" class="btn ghost wide-btn" type="button">Clear Schedule</button>
-      </section>
-
-      <section class="panel" aria-labelledby="automationTitle">
-        <div class="section-title">
-          <svg><use href="#i-shield"></use></svg>
-          <h2 id="automationTitle">Automation Status</h2>
+        <div class="preview-card">
+          <span>Next Scheduled Run</span>
+          <strong id="schedulePreview">Not scheduled</strong>
         </div>
-        <dl class="status-list">
-          <div><dt>State</dt><dd id="stateText">Idle</dd></div>
-          <div><dt>Error</dt><dd id="lastError">-</dd></div>
-        </dl>
+        <button id="clearScheduleBtn" class="btn ghost wide-btn" type="button">Clear Schedule</button>
       </section>
 
       <section class="panel" aria-labelledby="notificationsTitle">
         <div class="section-title">
           <svg><use href="#i-bell"></use></svg>
-          <h2 id="notificationsTitle">Notifications</h2>
+          <h2 id="notificationsTitle">Notifications & Alarm</h2>
         </div>
         <div class="form-grid">
           <label class="switch-row">
@@ -111,32 +118,28 @@
           </label>
           <label class="switch-row">
             <input id="soundEnabled" type="checkbox">
-            <span>Alarm sound</span>
+            <span>Looping alarm</span>
           </label>
           <label>
             Volume
             <input id="volume" type="range" min="0" max="1" step="0.05">
           </label>
         </div>
-        <div class="button-row">
+        <div class="button-row three">
           <button id="testAlarmBtn" class="btn secondary" type="button"><svg><use href="#i-volume"></use></svg>Test Alarm</button>
           <button id="muteAlarmBtn" class="btn ghost" type="button">Mute</button>
           <button id="stopAlarmBtn" class="btn ghost" type="button">Stop Alarm</button>
         </div>
       </section>
 
-      <section class="panel" aria-labelledby="settingsTitle">
+      <section class="panel compact-settings" aria-labelledby="settingsTitle">
         <div class="section-title">
           <svg><use href="#i-settings"></use></svg>
           <h2 id="settingsTitle">Settings</h2>
         </div>
         <div class="form-grid">
           <label>
-            Max Retry Attempts
-            <input id="maxAttempts" type="number" min="0" max="20">
-          </label>
-          <label>
-            Base Retry Delay (seconds)
+            Retry Delay (seconds)
             <input id="baseDelay" type="number" min="1" max="3600">
           </label>
           <label>
@@ -152,8 +155,11 @@
       </section>
     </main>
 
+    <div id="toastViewport" class="toast-viewport" aria-live="polite"></div>
+
     <script src="../utils/storage.js"></script>
     <script src="../utils/timers.js"></script>
+    <script src="../utils/scheduler.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

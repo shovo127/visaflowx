@@ -16,15 +16,14 @@
       updatedAt: ""
     },
     retry: {
-      enabled: true,
-      maxAttempts: 5,
       baseDelayMs: 15000,
       maxDelayMs: 180000,
       refreshMode: "soft"
     },
     schedule: {
       enabled: false,
-      runAt: "",
+      date: "",
+      time: "",
       nextRunAt: null
     },
     settings: {
@@ -82,8 +81,6 @@
     return {
       ...DEFAULTS.retry,
       ...retry,
-      enabled: retry.enabled !== false,
-      maxAttempts: Math.max(0, Math.min(20, Number(retry.maxAttempts ?? DEFAULTS.retry.maxAttempts))),
       baseDelayMs: Math.max(1000, Number(retry.baseDelayMs ?? DEFAULTS.retry.baseDelayMs)),
       maxDelayMs: Math.max(5000, Number(retry.maxDelayMs ?? DEFAULTS.retry.maxDelayMs)),
       refreshMode: ["none", "soft", "hard"].includes(retry.refreshMode) ? retry.refreshMode : DEFAULTS.retry.refreshMode
@@ -95,7 +92,8 @@
       ...DEFAULTS.schedule,
       ...schedule,
       enabled: schedule.enabled === true,
-      runAt: String(schedule.runAt || ""),
+      date: String(schedule.date || ""),
+      time: String(schedule.time || ""),
       nextRunAt: schedule.nextRunAt ? Number(schedule.nextRunAt) : null
     };
   }
@@ -154,6 +152,12 @@
     return value;
   }
 
+  async function clearCredentials() {
+    const value = { ...DEFAULTS.credentials, updatedAt: new Date().toISOString() };
+    await set({ [STORAGE_KEYS.CREDENTIALS]: value });
+    return value;
+  }
+
   async function saveRetry(retry) {
     const value = cleanRetry(retry);
     await set({ [STORAGE_KEYS.RETRY]: value });
@@ -186,6 +190,7 @@
     cleanSchedule,
     cleanSettings,
     cleanStatus,
+    clearCredentials,
     ensureDefaults,
     get,
     saveCredentials,

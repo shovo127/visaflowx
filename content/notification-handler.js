@@ -1,19 +1,17 @@
 (function initVisaFlowXNotificationHandler(global) {
   "use strict";
 
+  const { Sounds } = global.VisaFlowX;
+
   let alarm = null;
   let muted = false;
-
-  function alarmUrl() {
-    return chrome.runtime.getURL("assets/sounds/alarm.wav");
-  }
 
   async function playAlarm({ volume = 1, muted: shouldMute = false } = {}) {
     stopAlarm();
     muted = shouldMute === true;
-    alarm = new Audio(alarmUrl());
+    alarm = new Audio(Sounds.alarmUrl());
     alarm.loop = true;
-    alarm.volume = muted ? 0 : Math.max(0, Math.min(1, Number(volume)));
+    alarm.volume = muted ? 0 : Sounds.clampVolume(volume);
     await alarm.play();
     return { ok: true };
   }
@@ -32,7 +30,7 @@
 
   function setVolume(volume) {
     muted = false;
-    if (alarm) alarm.volume = Math.max(0, Math.min(1, Number(volume)));
+    if (alarm) alarm.volume = Sounds.clampVolume(volume);
   }
 
   function isPlaying() {

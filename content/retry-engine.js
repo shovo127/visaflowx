@@ -23,7 +23,7 @@
     }
 
     async handlePageState(pageState, retrySettings) {
-      if (!retrySettings?.enabled || this.hasPendingRetry()) return false;
+      if (this.hasPendingRetry()) return false;
       const retryDelay = Parser.parseRetryDelay(pageState.text);
       if (retryDelay) {
         await this.schedule(retryDelay.ms, `Retry message: ${retryDelay.source}`, "reload", retrySettings);
@@ -38,21 +38,10 @@
     }
 
     async schedule(delayMs, reason, mode, retrySettings) {
-      const maxAttempts = Number(retrySettings.maxAttempts || 5);
-      if (this.attempt >= maxAttempts) {
-        await this.controller.updateStatus({
-          state: "ERROR",
-          retryCountdownEndsAt: null,
-          lastAction: "Retry limit reached",
-          lastError: reason
-        });
-        return;
-      }
-
       this.attempt += 1;
       this.endsAt = Date.now() + delayMs;
       await this.controller.updateStatus({
-        state: "RETRY_COUNTDOWN",
+        state: "RETRYING",
         retryCountdownEndsAt: this.endsAt,
         lastAction: reason,
         lastError: ""
@@ -73,7 +62,7 @@
 
     async perform(mode, retrySettings) {
       await this.controller.updateStatus({
-        state: "DETECTING_PAGE",
+        state: "RETRYING",
         retryCountdownEndsAt: null,
         lastAction: `Retry attempt ${this.attempt}`,
         lastError: ""

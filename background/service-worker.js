@@ -3,16 +3,19 @@
 
 importScripts(
   "../utils/storage.js",
+  "../utils/scheduler.js",
+  "../utils/notifications.js",
   "../utils/parser.js",
   "../utils/timers.js"
 );
 
-const { Storage } = self.VisaFlowX;
+const { Notifications, Scheduler, Storage } = self.VisaFlowX;
 
 const IVAC_SIGNIN_URL = "https://appointment.ivacbd.com/signin";
 
 const CONTENT_FILES = [
   "utils/storage.js",
+  "utils/sounds.js",
   "utils/timers.js",
   "utils/parser.js",
   "utils/dom-utils.js",
@@ -57,14 +60,32 @@ async function broadcast(message) {
 }
 
 async function notify(kind, title, message) {
-  const state = await Storage.ensureDefaults();
-  if (state.settings.notifications === false) return;
-  await chrome.notifications.create(`vfx-${kind}-${Date.now()}`, {
-    type: "basic",
-    iconUrl: "assets/icons/icon128.png",
-    title,
-    message
-  });
+  return Notifications.send(Storage, kind, title, message);
+}
+
+async function waitForTabReady(tabId, timeoutMs = 12000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab?.status === "complete" && isIvacUrl(tab.url || "")) return tab;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+  throw new Error("Waiting for page load");
+}
+
+async function sendToContent(tabId, message, { reinject = true } = {}) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch (error) {
+    if (!reinject) throw new Error("IVAC page not ready");
+    await waitForTabReady(tabId).catch(() => null);
+    await ensureContent(tabId);
+    try {
+      return await chrome.tabs.sendMessage(tabId, message);
+    } catch (_) {
+      throw new Error("IVAC page not ready");
+    }
+  }
 }
 
 async function ensureContent(tabId) {
@@ -109,7 +130,7 @@ async function startAutomation({ source = "manual" } = {}) {
   const tab = await getOrOpenIvacTab();
 
   await updateStatus({
-    state: "DETECTING_PAGE",
+    state: "RUNNING",
     activeTabId: tab.id,
     page: tab.url || IVAC_SIGNIN_URL,
     lastAction: source === "schedule" ? "Scheduled run started" : "Automation starting",
@@ -118,7 +139,7 @@ async function startAutomation({ source = "manual" } = {}) {
 
   const launch = async () => {
     const injection = await ensureContent(tab.id);
-    await chrome.tabs.sendMessage(tab.id, {
+    await sendToContent(tab.id, {
       type: "START_AUTOMATION",
       credentials: state.credentials,
       retry: state.retry,
@@ -126,7 +147,7 @@ async function startAutomation({ source = "manual" } = {}) {
       source
     });
     await updateStatus({
-      state: "DETECTING_PAGE",
+      state: "RUNNING",
       activeTabId: tab.id,
       page: injection.url,
       schedulerState: source === "schedule" ? "Started" : state.schedule.enabled ? "Scheduled" : "Not scheduled",
@@ -140,7 +161,7 @@ async function startAutomation({ source = "manual" } = {}) {
   };
 
   if (tab.status === "loading") {
-    await new Promise((resolve) => setTimeout(resolve, 1800));
+    await waitForTabReady(tab.id).catch(() => null);
   }
   return launch();
 }
@@ -149,7 +170,7 @@ async function stopAutomation({ reason = "manual" } = {}) {
   const state = await Storage.ensureDefaults();
   const tabId = state.status.activeTabId;
   if (tabId) {
-    await chrome.tabs.sendMessage(tabId, { type: "STOP_AUTOMATION", reason }).catch(() => {});
+    await sendToContent(tabId, { type: "STOP_AUTOMATION", reason }, { reinject: false }).catch(() => {});
   }
   const status = await updateStatus({
     state: "IDLE",
@@ -159,31 +180,22 @@ async function stopAutomation({ reason = "manual" } = {}) {
     lastAction: `Automation stopped (${reason})`,
     lastError: ""
   });
+  await notify("stopped", "VisaFlowX stopped", `Automation stopped (${reason}).`);
   return { ok: true, status };
 }
 
-function alarmName() {
-  return "vfx-scheduled-run";
-}
-
-function parseScheduleTime(runAt) {
-  const date = new Date(runAt);
-  if (Number.isNaN(date.getTime())) throw new Error("Choose a valid schedule date and time.");
-  if (date.getTime() <= Date.now()) throw new Error("Schedule time must be in the future.");
-  return date.getTime();
-}
-
 async function saveSchedule(schedule) {
-  const when = parseScheduleTime(schedule.runAt);
+  const when = Scheduler.parseLocalRun(schedule.date, schedule.time);
   const value = await Storage.saveSchedule({
     enabled: true,
-    runAt: schedule.runAt,
+    date: schedule.date,
+    time: schedule.time,
     nextRunAt: when
   });
-  await chrome.alarms.create(alarmName(), { when });
+  await chrome.alarms.create(Scheduler.alarmName(), { when });
   await updateStatus({
     state: "SCHEDULED",
-    schedulerState: `Scheduled for ${new Date(when).toLocaleString()}`,
+    schedulerState: Scheduler.preview(value),
     lastAction: "Scheduled automation saved",
     lastError: ""
   });
@@ -191,8 +203,8 @@ async function saveSchedule(schedule) {
 }
 
 async function clearSchedule() {
-  await chrome.alarms.clear(alarmName());
-  const schedule = await Storage.saveSchedule({ enabled: false, runAt: "", nextRunAt: null });
+  await chrome.alarms.clear(Scheduler.alarmName());
+  const schedule = await Storage.saveSchedule({ enabled: false, date: "", time: "", nextRunAt: null });
   await updateStatus({
     state: "IDLE",
     schedulerState: "Not scheduled",
@@ -221,6 +233,10 @@ async function handleStatusUpdate(message, sender) {
 }
 
 async function handleOtpDetected(message, sender) {
+  if (sender.tab?.id) {
+    await chrome.tabs.update(sender.tab.id, { active: true }).catch(() => {});
+    if (sender.tab.windowId) await chrome.windows.update(sender.tab.windowId, { focused: true }).catch(() => {});
+  }
   const status = await updateStatus({
     state: "OTP_DETECTED",
     activeTabId: sender.tab?.id || null,
@@ -243,6 +259,11 @@ async function handleMessage(message, sender = {}) {
       const credentials = await Storage.saveCredentials(message.credentials || {});
       await updateStatus({ lastAction: "Credentials saved", lastError: "" });
       return { ok: true, credentials: { contactNumber: credentials.contactNumber, hasPassword: Boolean(credentials.password) } };
+    }
+    case "CLEAR_CREDENTIALS": {
+      await Storage.clearCredentials();
+      await updateStatus({ lastAction: "Credentials cleared", lastError: "" });
+      return { ok: true };
     }
     case "SAVE_RETRY":
       return { ok: true, retry: await Storage.saveRetry(message.retry || {}) };
@@ -269,8 +290,9 @@ async function handleMessage(message, sender = {}) {
     case "SET_ALARM_VOLUME": {
       const state = await Storage.ensureDefaults();
       const tabId = state.status.activeTabId || (await getActiveTab())?.id;
-      if (tabId) await ensureContent(tabId).catch(() => null);
-      if (tabId) await chrome.tabs.sendMessage(tabId, message).catch(() => {});
+      if (!tabId) throw new Error("Open the IVAC page to test the alarm.");
+      await ensureContent(tabId);
+      await sendToContent(tabId, message);
       return { ok: true };
     }
     default:
@@ -282,7 +304,7 @@ chrome.runtime.onInstalled.addListener(() => {
   Storage.ensureDefaults()
     .then((state) => {
       if (state.schedule.enabled && state.schedule.nextRunAt) {
-        return chrome.alarms.create(alarmName(), { when: state.schedule.nextRunAt });
+        return chrome.alarms.create(Scheduler.alarmName(), { when: state.schedule.nextRunAt });
       }
       return null;
     })
@@ -293,7 +315,7 @@ chrome.runtime.onStartup.addListener(() => {
   Storage.ensureDefaults()
     .then((state) => {
       if (state.schedule.enabled && state.schedule.nextRunAt && state.schedule.nextRunAt > Date.now()) {
-        return chrome.alarms.create(alarmName(), { when: state.schedule.nextRunAt });
+        return chrome.alarms.create(Scheduler.alarmName(), { when: state.schedule.nextRunAt });
       }
       return null;
     })
@@ -327,11 +349,25 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== alarmName()) return;
+  if (alarm.name !== Scheduler.alarmName()) return;
+  Storage.saveSchedule({ enabled: false, date: "", time: "", nextRunAt: null }).catch(() => {});
   startAutomation({ source: "schedule" }).catch((error) => {
     updateStatus({ state: "ERROR", schedulerState: "Failed", lastAction: "Scheduled run failed", lastError: error.message });
     notify("error", "Scheduled run failed", error.message);
   });
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete" || !isIvacUrl(tab.url || "")) return;
+  Storage.ensureDefaults().then((state) => {
+    if (state.status.activeTabId !== tabId) return;
+    if (!["RUNNING", "RETRYING", "WAITING_VERIFICATION"].includes(state.status.state)) return;
+    setTimeout(() => {
+      startAutomation({ source: "resume" }).catch((error) => {
+        updateStatus({ state: "ERROR", lastAction: "Resume failed", lastError: error.message });
+      });
+    }, 600);
+  }).catch(() => {});
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {

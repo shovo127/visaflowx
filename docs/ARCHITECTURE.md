@@ -11,6 +11,7 @@ popup UI
       -> retry engine
       -> OTP monitor
       -> alarm handler
+    -> storage / scheduler / notification helpers
 ```
 
 ## Background
@@ -20,9 +21,10 @@ popup UI
 - Owns Chrome storage defaults.
 - Starts and stops automation.
 - Injects content scripts if needed.
-- Manages one scheduled run through `chrome.alarms`.
-- Sends desktop notifications.
+- Manages one scheduled run through `chrome.alarms` and restores it on browser startup.
+- Sends desktop notifications through a helper with graceful failure handling.
 - Tracks tab-close shutdown.
+- Resumes automation after retry-driven reloads.
 
 ## Content
 
@@ -43,7 +45,7 @@ popup UI
 
 - Parses retry countdown text.
 - Recovers from page errors by going back, reloading, and restarting safely.
-- Respects retry attempt limits.
+- Retries continuously until OTP appears or the user manually stops automation.
 
 `content/otp-monitor.js`
 

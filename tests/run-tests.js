@@ -34,6 +34,7 @@ function testManifest() {
   const scripts = manifest.content_scripts[0].js;
   [
     "utils/storage.js",
+    "utils/sounds.js",
     "utils/timers.js",
     "utils/parser.js",
     "utils/dom-utils.js",
@@ -62,6 +63,9 @@ function testRequiredStructure() {
     "popup/popup.css",
     "popup/popup.js",
     "utils/storage.js",
+    "utils/scheduler.js",
+    "utils/notifications.js",
+    "utils/sounds.js",
     "utils/timers.js",
     "utils/parser.js",
     "utils/dom-utils.js",
@@ -95,10 +99,21 @@ async function testStorageDefaults() {
   const Storage = require(path.join(root, "utils/storage.js"));
   const defaults = await Storage.ensureDefaults();
   assert(defaults.credentials.contactNumber === "", "Credentials default should be empty");
-  assert(defaults.retry.enabled === true, "Retry should default enabled");
+  assert(!Object.hasOwn(defaults.retry, "maxAttempts"), "Retry must not keep max attempts");
   assert(defaults.schedule.enabled === false, "Schedule should default disabled");
+  assert(defaults.schedule.date === "" && defaults.schedule.time === "", "Schedule should use separate date and time fields");
   assert(defaults.settings.notifications === true, "Notifications should default enabled");
   assert(defaults.status.state === "IDLE", "Status should default idle");
+}
+
+function testScheduler() {
+  delete require.cache[require.resolve(path.join(root, "utils/scheduler.js"))];
+  const Scheduler = require(path.join(root, "utils/scheduler.js"));
+  const future = new Date(Date.now() + 3600000);
+  const parts = Scheduler.localDateParts(future);
+  const nextRunAt = Scheduler.parseLocalRun(parts.date, parts.time);
+  assert(nextRunAt > Date.now(), "Scheduler should parse a future local date/time");
+  assert(Scheduler.preview({ enabled: true, nextRunAt }).startsWith("Next run:"), "Scheduler preview failed");
 }
 
 function testOtpSafety() {
@@ -114,9 +129,11 @@ function testPopupSections() {
   ["Dashboard", "Credentials", "Scheduler", "Automation Status", "Notifications", "Settings"].forEach((section) => {
     assert(html.includes(section), `Popup section missing: ${section}`);
   });
-  ["Start Automation", "Stop Automation", "Save Credentials", "Schedule Run", "Test Notification"].forEach((label) => {
+  ["Start Automation", "Stop Automation", "Save Credentials", "Update", "Clear", "Schedule Run", "Test Notification"].forEach((label) => {
     assert(html.includes(label), `Quick action missing: ${label}`);
   });
+  assert(!html.includes("Max Retry Attempts"), "Popup must not expose max retry attempts");
+  assert(!html.includes("datetime-local"), "Scheduler must use separate date and time fields");
 }
 
 function testSafetyStaticScan() {
@@ -130,6 +147,7 @@ function testSafetyStaticScan() {
     "docs/SECURITY.md"
   ];
   const combined = files.map(read).join("\n").toLowerCase();
+  assert(!combined.includes("maxattempts"), "Runtime must not contain max retry attempt logic");
   [
     "turnstile.execute",
     "grecaptcha.execute",
@@ -150,6 +168,7 @@ async function main() {
   testRequiredStructure();
   testParser();
   await testStorageDefaults();
+  testScheduler();
   testOtpSafety();
   testPopupSections();
   testSafetyStaticScan();
