@@ -1,35 +1,51 @@
-(function initNotificationHandler(global) {
+(function initVisaFlowXNotificationHandler(global) {
   "use strict";
 
-  let audio = null;
+  let alarm = null;
+  let muted = false;
 
-  function getAlarmUrl() {
-    if (global.chrome?.runtime?.getURL) return chrome.runtime.getURL("assets/sounds/alarm.wav");
-    return "";
+  function alarmUrl() {
+    return chrome.runtime.getURL("assets/sounds/alarm.wav");
   }
 
-  async function playAlarm({ loop = true, volume = 0.9 } = {}) {
+  async function playAlarm({ volume = 1, muted: shouldMute = false } = {}) {
     stopAlarm();
-    const url = getAlarmUrl();
-    if (!url) return { ok: false, error: "Alarm URL unavailable" };
-    audio = new Audio(url);
-    audio.loop = loop;
-    audio.volume = Math.max(0, Math.min(1, Number(volume)));
-    await audio.play();
+    muted = shouldMute === true;
+    alarm = new Audio(alarmUrl());
+    alarm.loop = true;
+    alarm.volume = muted ? 0 : Math.max(0, Math.min(1, Number(volume)));
+    await alarm.play();
     return { ok: true };
   }
 
   function stopAlarm() {
-    if (!audio) return;
-    audio.pause();
-    audio.currentTime = 0;
-    audio = null;
+    if (!alarm) return;
+    alarm.pause();
+    alarm.currentTime = 0;
+    alarm = null;
+  }
+
+  function muteAlarm() {
+    muted = true;
+    if (alarm) alarm.volume = 0;
   }
 
   function setVolume(volume) {
-    if (audio) audio.volume = Math.max(0, Math.min(1, Number(volume)));
+    muted = false;
+    if (alarm) alarm.volume = Math.max(0, Math.min(1, Number(volume)));
   }
 
-  const NotificationHandler = Object.freeze({ playAlarm, setVolume, stopAlarm });
-  global.VisaFlowXUniversal = Object.assign(global.VisaFlowXUniversal || {}, { NotificationHandler });
+  function isPlaying() {
+    return Boolean(alarm);
+  }
+
+  const NotificationHandler = Object.freeze({
+    isPlaying,
+    muteAlarm,
+    playAlarm,
+    setVolume,
+    stopAlarm
+  });
+
+  global.VisaFlowX = Object.assign(global.VisaFlowX || {}, { NotificationHandler });
 })(typeof globalThis !== "undefined" ? globalThis : this);

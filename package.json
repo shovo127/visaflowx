@@ -1,8 +1,8 @@
 {
-  "name": "visaflowx-universal",
-  "version": "1.0.1",
+  "name": "visaflowx",
+  "version": "2.0.0",
   "private": true,
-  "description": "Production-grade universal browser workflow automation assistant extension.",
+  "description": "Production-grade IVAC workflow automation Chrome extension.",
   "license": "MIT",
   "scripts": {
     "check": "node tests/check-syntax.js",

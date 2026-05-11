@@ -3,201 +3,115 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>VisaFlowX Universal</title>
+    <title>VisaFlowX</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <main class="app-shell" aria-live="polite">
-      <header class="app-header">
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="i-dashboard" viewBox="0 0 24 24"><path d="M4 13h7V4H4v9Zm0 7h7v-5H4v5Zm9 0h7v-9h-7v9Zm0-16v5h7V4h-7Z"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7L8 5Z"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6V6Z"/></symbol>
+      <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5V4Zm3 2v5h8V6H8Zm0 10v2h8v-2H8Z"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm1 5v4.4l3 1.8-1 1.7-4-2.4V8h2Z"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 22a2.5 2.5 0 0 0 2.4-2h-4.8A2.5 2.5 0 0 0 12 22Zm7-6-2-2v-4a5 5 0 0 0-4-4.9V3h-2v2.1A5 5 0 0 0 7 10v4l-2 2v2h14v-2Z"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><path d="M7.5 14A5.5 5.5 0 1 1 13 8.5 5.5 5.5 0 0 1 7.5 14Zm0-3A2.5 2.5 0 1 0 5 8.5 2.5 2.5 0 0 0 7.5 11ZM12 13l3 3 2-2 2 2-2 2 2 2-2 2-7-7 2-2Z"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2 20 5v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5l8-3Zm-1 13.6 6-6L15.6 8 11 12.6 8.4 10 7 11.4l4 4.2Z"/></symbol>
+      <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4Zm12.5-1.5-1.4 1.4a4 4 0 0 1 0 6.2l1.4 1.4a6 6 0 0 0 0-9Z"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="m19.4 13.5.1-1.5-.1-1.5 2-1.5-2-3.5-2.4 1a8 8 0 0 0-2.6-1.5L14 2h-4l-.4 2.5A8 8 0 0 0 7 6L4.6 5 2.6 8.5l2 1.5-.1 1.5.1 1.5-2 1.5 2 3.5 2.4-1a8 8 0 0 0 2.6 1.5L10 22h4l.4-2.5A8 8 0 0 0 17 18l2.4 1 2-3.5-2-1.5ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"/></symbol>
+    </svg>
+
+    <main class="shell">
+      <header class="topbar">
         <div>
-          <p class="eyebrow">Universal workflow assistant</p>
-          <h1>VisaFlowX Universal</h1>
+          <p class="eyebrow">IVAC workflow assistant</p>
+          <h1>VisaFlowX</h1>
         </div>
         <span id="stateBadge" class="state-badge idle">Idle</span>
       </header>
 
-      <section class="hero-card" aria-labelledby="quick-actions-title">
-        <div class="hero-copy">
-          <h2 id="quick-actions-title">Dashboard</h2>
-          <p id="statusText">Ready to monitor and automate safe workflow actions.</p>
+      <section class="panel dashboard" aria-labelledby="dashboardTitle">
+        <div class="section-title">
+          <svg><use href="#i-dashboard"></use></svg>
+          <h2 id="dashboardTitle">Dashboard</h2>
         </div>
-        <div class="action-grid">
-          <button id="startBtn" class="btn btn-primary" type="button">Start Monitoring</button>
-          <button id="stopBtn" class="btn btn-secondary" type="button">Stop</button>
-          <button id="selectAreaBtn" class="btn btn-secondary" type="button">Select Area</button>
-          <button id="testNotificationBtn" class="btn btn-secondary" type="button">Test Notification</button>
+        <div class="status-grid">
+          <article><span>Current Page</span><strong id="currentPage">-</strong></article>
+          <article><span>Retry Countdown</span><strong id="retryCountdown">-</strong></article>
+          <article><span>Verification</span><strong id="verificationState">Idle</strong></article>
+          <article><span>OTP</span><strong id="otpState">Idle</strong></article>
+          <article><span>Scheduler</span><strong id="schedulerState">Not scheduled</strong></article>
+          <article><span>Last Action</span><strong id="lastAction">Ready</strong></article>
         </div>
       </section>
 
-      <section class="status-grid" aria-label="Live automation status">
-        <article class="metric-card">
-          <span>Active Site</span>
-          <strong id="activeSite">-</strong>
-        </article>
-        <article class="metric-card">
-          <span>Workflow Stage</span>
-          <strong id="workflowStage">Idle</strong>
-        </article>
-        <article class="metric-card">
-          <span>Retry Timer</span>
-          <strong id="retryTimer">-</strong>
-        </article>
-        <article class="metric-card">
-          <span>Current Rule</span>
-          <strong id="currentRule">-</strong>
-        </article>
-        <article class="metric-card">
-          <span>Monitored Text</span>
-          <strong id="monitoredText">-</strong>
-        </article>
-        <article class="metric-card">
-          <span>Last Action</span>
-          <strong id="lastActionMetric">-</strong>
-        </article>
+      <section class="panel actions" aria-label="Quick Actions">
+        <button id="startBtn" class="btn primary" type="button"><svg><use href="#i-play"></use></svg>Start Automation</button>
+        <button id="stopBtn" class="btn secondary" type="button"><svg><use href="#i-stop"></use></svg>Stop Automation</button>
+        <button id="saveCredentialsBtn" class="btn secondary" type="button"><svg><use href="#i-save"></use></svg>Save Credentials</button>
+        <button id="scheduleBtn" class="btn secondary" type="button"><svg><use href="#i-clock"></use></svg>Schedule Run</button>
+        <button id="testNotificationBtn" class="btn ghost" type="button"><svg><use href="#i-bell"></use></svg>Test Notification</button>
       </section>
 
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Profiles</h2>
-          <select id="profileSelect" aria-label="Active profile"></select>
+      <section class="panel" aria-labelledby="credentialsTitle">
+        <div class="section-title">
+          <svg><use href="#i-key"></use></svg>
+          <h2 id="credentialsTitle">Credentials</h2>
         </div>
         <div class="form-grid">
           <label>
-            Profile Name
-            <input id="profileName" type="text" autocomplete="off">
+            Contact Number
+            <input id="contactNumber" type="tel" inputmode="tel" autocomplete="tel">
           </label>
           <label>
-            Start URL
-            <input id="startUrl" type="url" placeholder="https://example.com">
-          </label>
-          <label class="wide">
-            URL Match Patterns
-            <input id="urlPatterns" type="text" placeholder="example.com, *.portal.edu/*">
+            Password
+            <input id="password" type="password" autocomplete="current-password">
           </label>
         </div>
-        <div class="button-row">
-          <button id="saveProfileBtn" class="btn btn-primary" type="button">Save Profile</button>
-          <button id="deleteProfileBtn" class="btn btn-ghost" type="button">Delete Profile</button>
-        </div>
+        <p class="hint">Stored in Chrome local extension storage and never logged or sent anywhere except the IVAC page fields.</p>
       </section>
 
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Monitor Rules</h2>
-          <span id="ruleCount" class="mini-badge">0 rules</span>
+      <section class="panel" aria-labelledby="schedulerTitle">
+        <div class="section-title">
+          <svg><use href="#i-clock"></use></svg>
+          <h2 id="schedulerTitle">Scheduler</h2>
         </div>
         <div class="form-grid">
           <label>
-            When
-            <select id="conditionType">
-              <option value="textAppears">Text appears</option>
-              <option value="selectorExists">Selector exists</option>
-              <option value="buttonEnabled">Button enabled</option>
-              <option value="pageError">Page error detected</option>
-              <option value="urlMatches">URL matches</option>
-            </select>
+            Start Time
+            <input id="scheduleRunAt" type="datetime-local">
           </label>
-          <label>
-            Text / Pattern
-            <input id="conditionText" type="text" placeholder="BOOK NOW">
-          </label>
-          <label>
-            Target Selector
-            <input id="targetSelector" type="text" placeholder="button, a, input[type='submit']">
-          </label>
-          <label>
-            Target Text
-            <input id="targetText" type="text" placeholder="Book">
-          </label>
-          <label>
-            Action
-            <select id="actionType">
-              <option value="click">Click element</option>
-              <option value="focus">Focus input</option>
-              <option value="fill">Fill input</option>
-              <option value="reload">Reload page</option>
-              <option value="back">Go back</option>
-              <option value="openUrl">Open URL</option>
-              <option value="scrollToElement">Scroll to element</option>
-            </select>
-          </label>
-          <label>
-            Fill Value / URL
-            <input id="actionValue" type="text" placeholder="Only needed for fill/open URL">
+          <label class="switch-row">
+            <input id="scheduleEnabled" type="checkbox">
+            <span>Enable scheduled automation</span>
           </label>
         </div>
-        <div class="button-row">
-          <button id="saveRuleBtn" class="btn btn-primary" type="button">Add Rule</button>
-          <button id="runRuleBtn" class="btn btn-secondary" type="button">Run First Rule</button>
-        </div>
-        <div id="ruleList" class="rule-list" aria-label="Configured rules"></div>
+        <button id="clearScheduleBtn" class="btn ghost wide-btn" type="button">Clear Schedule</button>
       </section>
 
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Scheduler</h2>
-          <span id="scheduleBadge" class="mini-badge">No schedule</span>
+      <section class="panel" aria-labelledby="automationTitle">
+        <div class="section-title">
+          <svg><use href="#i-shield"></use></svg>
+          <h2 id="automationTitle">Automation Status</h2>
+        </div>
+        <dl class="status-list">
+          <div><dt>State</dt><dd id="stateText">Idle</dd></div>
+          <div><dt>Error</dt><dd id="lastError">-</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel" aria-labelledby="notificationsTitle">
+        <div class="section-title">
+          <svg><use href="#i-bell"></use></svg>
+          <h2 id="notificationsTitle">Notifications</h2>
         </div>
         <div class="form-grid">
-          <label>
-            Start Date & Time
-            <input id="scheduleDateTime" type="datetime-local">
-          </label>
-          <label>
-            Recurring
-            <select id="scheduleRecurring">
-              <option value="none">One time</option>
-              <option value="hourly">Hourly</option>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-            </select>
-          </label>
-        </div>
-        <div class="button-row">
-          <button id="scheduleBtn" class="btn btn-primary" type="button">Schedule Run</button>
-          <button id="clearScheduleBtn" class="btn btn-ghost" type="button">Clear Schedule</button>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Retry Engine</h2>
-          <span id="retryModeBadge" class="mini-badge">Soft refresh</span>
-        </div>
-        <div class="form-grid">
-          <label>
-            Max Attempts
-            <input id="maxAttempts" type="number" min="0" max="20">
-          </label>
-          <label>
-            Base Delay (seconds)
-            <input id="baseDelay" type="number" min="1" max="3600">
-          </label>
-          <label>
-            Refresh Mode
-            <select id="refreshMode">
-              <option value="none">No refresh</option>
-              <option value="soft">Soft refresh</option>
-              <option value="hard">Hard refresh</option>
-            </select>
-          </label>
-          <label class="switch-line">
-            <input id="retryEnabled" type="checkbox">
-            <span>Enable retry engine</span>
-          </label>
-        </div>
-      </section>
-
-      <details class="panel details-panel">
-        <summary>Notifications</summary>
-        <div class="form-grid details-content">
-          <label class="switch-line">
+          <label class="switch-row">
             <input id="notificationsEnabled" type="checkbox">
             <span>Desktop notifications</span>
           </label>
-          <label class="switch-line">
+          <label class="switch-row">
             <input id="soundEnabled" type="checkbox">
-            <span>Sound alerts</span>
+            <span>Alarm sound</span>
           </label>
           <label>
             Volume
@@ -205,33 +119,41 @@
           </label>
         </div>
         <div class="button-row">
-          <button id="testAlarmBtn" class="btn btn-secondary" type="button">Test Alarm</button>
-          <button id="stopAlarmBtn" class="btn btn-ghost" type="button">Stop Alarm</button>
+          <button id="testAlarmBtn" class="btn secondary" type="button"><svg><use href="#i-volume"></use></svg>Test Alarm</button>
+          <button id="muteAlarmBtn" class="btn ghost" type="button">Mute</button>
+          <button id="stopAlarmBtn" class="btn ghost" type="button">Stop Alarm</button>
         </div>
-      </details>
+      </section>
 
-      <details class="panel details-panel">
-        <summary>Advanced Settings</summary>
-        <dl class="debug-grid details-content">
-          <div><dt>Active Tab URL</dt><dd id="debugUrl">-</dd></div>
-          <div><dt>Content Status</dt><dd id="debugContent">Unknown</dd></div>
-          <div><dt>Last Message</dt><dd id="debugMessage">-</dd></div>
-          <div><dt>Last Error</dt><dd id="lastError">-</dd></div>
-        </dl>
-      </details>
-
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Logs</h2>
-          <button id="clearLogsBtn" class="btn btn-small" type="button">Clear</button>
+      <section class="panel" aria-labelledby="settingsTitle">
+        <div class="section-title">
+          <svg><use href="#i-settings"></use></svg>
+          <h2 id="settingsTitle">Settings</h2>
         </div>
-        <ol id="logs" class="logs"></ol>
+        <div class="form-grid">
+          <label>
+            Max Retry Attempts
+            <input id="maxAttempts" type="number" min="0" max="20">
+          </label>
+          <label>
+            Base Retry Delay (seconds)
+            <input id="baseDelay" type="number" min="1" max="3600">
+          </label>
+          <label>
+            Recovery Mode
+            <select id="refreshMode">
+              <option value="soft">Reload page</option>
+              <option value="hard">Hard refresh</option>
+              <option value="none">No refresh</option>
+            </select>
+          </label>
+        </div>
+        <button id="saveSettingsBtn" class="btn secondary wide-btn" type="button">Save Settings</button>
       </section>
     </main>
 
-    <script src="../utils/constants.js"></script>
+    <script src="../utils/storage.js"></script>
     <script src="../utils/timers.js"></script>
-    <script src="../utils/parser.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

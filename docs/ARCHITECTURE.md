@@ -1,82 +1,62 @@
 # Architecture
 
-VisaFlowX Universal is split into isolated MV3 layers.
+VisaFlowX is a focused IVAC-only MV3 extension.
 
 ```text
 popup UI
   -> background service worker
-    -> content bootstrap
-      -> monitor engine
-        -> rule engine
-        -> action runner
-        -> OTP detector
-        -> retry/error recovery
+    -> IVAC content scripts
+      -> detector
+      -> automation controller
+      -> retry engine
+      -> OTP monitor
+      -> alarm handler
 ```
 
 ## Background
 
 `background/service-worker.js`
 
-- Owns storage state.
-- Injects content scripts with `chrome.scripting.executeScript`.
-- Handles schedules through `chrome.alarms`.
-- Sends notifications.
-- Tracks active status, logs, active profile, and tab lifecycle.
+- Owns Chrome storage defaults.
+- Starts and stops automation.
+- Injects content scripts if needed.
+- Manages one scheduled run through `chrome.alarms`.
+- Sends desktop notifications.
+- Tracks tab-close shutdown.
 
 ## Content
 
-`content/bootstrap.js`
+`content/detector.js`
 
-- Receives runtime messages.
-- Starts and stops monitoring.
-- Runs the area selector.
-- Plays and stops test alarm sounds.
+- Detects IVAC signin, OTP, completed, error, and unsupported states.
+- Finds contact, password, Sign In, verification, and OTP elements with stable selector lists.
 
-`content/monitor.js`
+`content/automation.js`
 
-- Uses `MutationObserver`.
-- Debounces expensive DOM evaluation.
-- Stops automation on OTP pages and triggers manual handoff alerts.
-- Detects retry text and page error text.
-- Runs matched rules.
-- Cleans observers and timers on stop.
+- Uses `MutationObserver` with debounced evaluation.
+- Autofills credentials.
+- Waits for manual verification completion.
+- Clicks Sign In after verification is gone.
+- Stops on OTP, completion, or manual stop.
 
-`content/otp-detector.js`
+`content/retry-engine.js`
 
-- Detects common OTP and verification-code inputs.
-- Focuses and highlights the OTP input when present.
-- Does not read or enter OTP data.
+- Parses retry countdown text.
+- Recovers from page errors by going back, reloading, and restarting safely.
+- Respects retry attempt limits.
 
-## Rules
+`content/otp-monitor.js`
 
-`rules/rule-engine.js`
-
-- Evaluates conditions against current URL, visible text, selectors, button state, error state, and protected verification state.
-
-`rules/action-runner.js`
-
-- Executes safe actions.
-- Blocks actions targeting protected challenge widgets.
-- Supports click, focus, fill, back, reload, open URL, wait for selector/text, and scroll/highlight.
-
-## Popup
-
-`popup/popup.html`, `popup/popup.css`, `popup/popup.js`
-
-- Provides a compact professional dashboard.
-- Creates profiles, rules, schedules, retry settings, and notification settings.
-- Renders live status from runtime messages and storage.
+- Focuses and pulse-highlights the OTP input.
+- Starts the looping local alarm.
+- Notifies the background service worker.
 
 ## Storage
 
 Chrome Storage Local stores:
 
-- Profiles
-- Rules
-- Retry settings
-- Schedules
-- App settings
-- Logs
-- Runtime status
-
-Sensitive field names are masked in logs.
+- credentials
+- retry settings
+- schedule settings
+- notification/sound settings
+- current status

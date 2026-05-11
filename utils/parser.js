@@ -1,27 +1,35 @@
-(function initParser(global) {
+(function initVisaFlowXParser(global) {
   "use strict";
+
+  const RETRY_HINT = /(try again|retry|please wait|wait|after|later|cooldown|too many requests|rate limit|temporarily blocked)/i;
+  const PAGE_ERROR_PATTERNS = Object.freeze([
+    "404",
+    "not found",
+    "timeout",
+    "timed out",
+    "session expired",
+    "service unavailable",
+    "temporarily unavailable",
+    "maintenance",
+    "bad gateway",
+    "gateway error",
+    "too many requests",
+    "rate limit"
+  ]);
 
   function normalizeText(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
   }
 
-  function escapeRegExp(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  function textMatches(haystack, needle, caseSensitive = false) {
-    const source = normalizeText(haystack);
-    const target = normalizeText(needle);
-    if (!target) return false;
-    return caseSensitive ? source.includes(target) : source.toLowerCase().includes(target.toLowerCase());
+  function textIncludes(source, target) {
+    const haystack = normalizeText(source).toLowerCase();
+    const needle = normalizeText(target).toLowerCase();
+    return Boolean(needle && haystack.includes(needle));
   }
 
   function parseRetryDelay(text) {
     const source = normalizeText(text).toLowerCase();
-    if (!source) return null;
-
-    const likelyRetry = /(try again|retry|please wait|wait|after|later|cooldown|login after|too many requests|rate limit)/i.test(source);
-    if (!likelyRetry) return null;
+    if (!source || !RETRY_HINT.test(source)) return null;
 
     let ms = 0;
     const durationPattern = /(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m(?!s)|seconds?|secs?|s)\b/g;
@@ -29,23 +37,21 @@
     while ((match = durationPattern.exec(source))) {
       const amount = Number(match[1]);
       const unit = match[2];
-      if (/^h|hour|hr/.test(unit)) ms += amount * 60 * 60 * 1000;
-      else if (/^m(?!s)|min|minute/.test(unit)) ms += amount * 60 * 1000;
-      else if (/^s|sec|second/.test(unit)) ms += amount * 1000;
+      if (/^(h|hour|hr)/.test(unit)) ms += amount * 60 * 60 * 1000;
+      else if (/^(m|min|minute)/.test(unit)) ms += amount * 60 * 1000;
+      else if (/^(s|sec|second)/.test(unit)) ms += amount * 1000;
     }
 
-    const clockMatch = source.match(/\b(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\b/);
-    if (!ms && clockMatch) {
-      const hours = Number(clockMatch[1] || 0);
-      const minutes = Number(clockMatch[2] || 0);
-      const seconds = Number(clockMatch[3] || 0);
+    const timer = source.match(/\b(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\b/);
+    if (!ms && timer) {
+      const hours = Number(timer[1] || 0);
+      const minutes = Number(timer[2] || 0);
+      const seconds = Number(timer[3] || 0);
       ms = ((hours * 3600) + (minutes * 60) + seconds) * 1000;
     }
 
-    const bareMinute = source.match(/\bafter\s+(\d{1,3})\b|\bwait\s+(\d{1,3})\b|\blogin\s+after\s+(\d{1,3})\b/);
-    if (!ms && bareMinute) {
-      ms = Number(bareMinute[1] || bareMinute[2] || bareMinute[3]) * 60 * 1000;
-    }
+    const bareMinutes = source.match(/\b(?:after|wait|retry)\s+(\d{1,3})\b/);
+    if (!ms && bareMinutes) ms = Number(bareMinutes[1]) * 60 * 1000;
 
     if (!ms) return null;
     return {
@@ -54,32 +60,25 @@
     };
   }
 
-  function wildcardToRegExp(pattern) {
-    const escaped = escapeRegExp(pattern || "*").replace(/\\\*/g, ".*");
-    return new RegExp(`^${escaped}$`, "i");
-  }
-
-  function urlMatches(url, patterns = []) {
-    if (!patterns.length) return true;
-    return patterns.some((pattern) => {
-      if (!pattern || pattern === "*") return true;
-      if (pattern.startsWith("/") && pattern.endsWith("/")) {
-        return new RegExp(pattern.slice(1, -1), "i").test(url);
-      }
-      return wildcardToRegExp(pattern.includes("*") ? pattern : `*${pattern}*`).test(url);
-    });
+  function detectPageError(text, url = "") {
+    const source = normalizeText(text).toLowerCase();
+    const href = String(url || "").toLowerCase();
+    if (/\/404(?:\b|\/|\?)/.test(href)) return "404 page";
+    const match = PAGE_ERROR_PATTERNS.find((pattern) => source.includes(pattern));
+    if (match) return match;
+    if (!source && typeof document !== "undefined" && document.readyState === "complete") return "blank page";
+    return "";
   }
 
   const Parser = Object.freeze({
-    escapeRegExp,
+    PAGE_ERROR_PATTERNS,
+    detectPageError,
     normalizeText,
     parseRetryDelay,
-    textMatches,
-    urlMatches,
-    wildcardToRegExp
+    textIncludes
   });
 
-  global.VisaFlowXUniversal = Object.assign(global.VisaFlowXUniversal || {}, { Parser });
+  global.VisaFlowX = Object.assign(global.VisaFlowX || {}, { Parser });
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = Parser;
