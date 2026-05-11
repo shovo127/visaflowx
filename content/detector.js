@@ -2,13 +2,13 @@
 
 window.VisaFlowXDetector = (() => {
   const PAGE_TYPES = {
-    LOGIN: "Login page",
-    OTP: "OTP page",
-    ERROR: "Error page",
-    RATE_LIMIT: "Rate limit page",
-    MAINTENANCE: "Maintenance page",
-    SESSION_EXPIRED: "Session expired page",
-    UNKNOWN: "Unknown"
+    LOGIN: "LOGIN_PAGE",
+    OTP: "OTP_PAGE",
+    ERROR: "ERROR_PAGE",
+    RATE_LIMIT: "RATE_LIMIT_PAGE",
+    MAINTENANCE: "MAINTENANCE_PAGE",
+    SESSION_EXPIRED: "SESSION_EXPIRED_PAGE",
+    UNKNOWN: "UNKNOWN_PAGE"
   };
 
   function getVisiblePageText() {
@@ -64,6 +64,7 @@ window.VisaFlowXDetector = (() => {
   }
 
   function detectPage() {
+    const currentUrl = window.location.href;
     const visibleText = getVisiblePageText();
     const normalized = window.VisaFlowXDom.normalizeText(visibleText);
     const otpInput = detectOtpInput();
@@ -104,6 +105,13 @@ window.VisaFlowXDetector = (() => {
       return {
         type: PAGE_TYPES.ERROR,
         reason: "Error text detected"
+      };
+    }
+
+    if (/appointment\.ivacbd\.com\/signin/i.test(currentUrl)) {
+      return {
+        type: PAGE_TYPES.LOGIN,
+        reason: "Signin URL detected"
       };
     }
 

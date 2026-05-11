@@ -54,7 +54,8 @@ for (const requiredText of [
   "Live Monitor",
   "Retry Timer",
   "Notifications",
-  "Advanced Settings"
+  "Advanced Settings",
+  "Developer Debug"
 ]) {
   assert(popupHtml.includes(requiredText), `Missing popup UI text: ${requiredText}`);
 }
@@ -62,5 +63,11 @@ for (const requiredText of [
 const serviceWorker = fs.readFileSync(path.join(root, "background", "service-worker.js"), "utf8");
 assert(serviceWorker.includes("chrome.runtime.onStartup"), "Startup must reset automation state");
 assert(serviceWorker.includes("injectContentScripts"), "Start flow must inject content scripts if missing");
+assert(serviceWorker.includes("PING_CONTENT"), "Background must verify content script attachment");
+assert(serviceWorker.includes("requireSignin"), "Start flow must require the signin URL");
+
+const detector = fs.readFileSync(path.join(root, "content", "detector.js"), "utf8");
+assert(detector.includes("LOGIN_PAGE"), "Detector must expose LOGIN_PAGE state");
+assert(detector.includes("/signin"), "Detector must recognize the IVAC signin URL");
 
 console.log("source-static.test.js passed");

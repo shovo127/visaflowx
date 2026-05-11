@@ -57,6 +57,15 @@ window.VisaFlowXStorage = (() => {
     captchaState: "Unknown",
     otpDetected: false,
     lastError: "",
+    debug: {
+      activeTabUrl: "",
+      injectionSuccess: false,
+      detectorState: "Unknown",
+      workflowState: "IDLE",
+      contentScriptStatus: "Not checked",
+      lastRuntimeMessage: "",
+      lastError: ""
+    },
     lastEventAt: null,
     lastMessage: "Ready"
   };

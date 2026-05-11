@@ -130,6 +130,18 @@ Core modules:
 - `content/retry-engine.js`: visible cooldown parsing and retry scheduling.
 - `background/offscreen.js`: looping alarm playback with `videoplayback.m4a`.
 
+## Developer Debug
+
+The popup includes a collapsible **Developer Debug** panel showing:
+
+- Active tab URL.
+- Injection success.
+- Detector state.
+- Workflow state.
+- Content script status.
+- Last runtime message.
+- Last error.
+
 ## Retry Detection Examples
 
 VisaFlowX can parse visible messages like:

@@ -38,7 +38,14 @@ const ui = {
   signInDelay: document.getElementById("signInDelay"),
   retryDelay: document.getElementById("retryDelay"),
   domWaitDelay: document.getElementById("domWaitDelay"),
-  saveDelays: document.getElementById("saveDelays")
+  saveDelays: document.getElementById("saveDelays"),
+  debugActiveTabUrl: document.getElementById("debugActiveTabUrl"),
+  debugInjectionSuccess: document.getElementById("debugInjectionSuccess"),
+  debugDetectorState: document.getElementById("debugDetectorState"),
+  debugWorkflowState: document.getElementById("debugWorkflowState"),
+  debugContentStatus: document.getElementById("debugContentStatus"),
+  debugLastRuntimeMessage: document.getElementById("debugLastRuntimeMessage"),
+  debugLastError: document.getElementById("debugLastError")
 };
 
 let latestStatus = null;
@@ -210,7 +217,19 @@ function renderStatus(status, settings) {
   setBadge(status, settings);
   renderStartButton(status, settings);
   setWorkflowState(status);
+  renderDebug(status);
   updateCountdown();
+}
+
+function renderDebug(status) {
+  const debug = status.debug || {};
+  ui.debugActiveTabUrl.textContent = debug.activeTabUrl || "Unknown";
+  ui.debugInjectionSuccess.textContent = debug.injectionSuccess ? "Yes" : "No";
+  ui.debugDetectorState.textContent = debug.detectorState || status.currentPage || "Unknown";
+  ui.debugWorkflowState.textContent = debug.workflowState || normalizeState(status);
+  ui.debugContentStatus.textContent = debug.contentScriptStatus || "Not checked";
+  ui.debugLastRuntimeMessage.textContent = debug.lastRuntimeMessage || "None";
+  ui.debugLastError.textContent = debug.lastError || status.lastError || "None";
 }
 
 function updateCountdown() {

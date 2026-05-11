@@ -62,6 +62,15 @@ const DEFAULT_STATUS = {
   captchaState: "Unknown",
   otpDetected: false,
   lastError: "",
+  debug: {
+    activeTabUrl: "",
+    injectionSuccess: false,
+    detectorState: "Unknown",
+    workflowState: "IDLE",
+    contentScriptStatus: "Not checked",
+    lastRuntimeMessage: "",
+    lastError: ""
+  },
   lastEventAt: null,
   lastMessage: "Ready"
 };
@@ -94,9 +103,11 @@ async function getStatus() {
 
 async function setStatus(patch) {
   const current = await getStatus();
+  const debug = patch && patch.debug ? mergeDeep(current.debug || DEFAULT_STATUS.debug, patch.debug) : current.debug;
   const next = {
     ...current,
     ...(patch || {}),
+    debug,
     lastEventAt: new Date().toISOString()
   };
   await storageSet(VF_KEYS.status, next);
@@ -149,13 +160,20 @@ function hasCredentials(credentials) {
   );
 }
 
-async function getActiveIvAcTab() {
+async function getActiveTab() {
   const tabs = await chrome.tabs.query({
     active: true,
-    currentWindow: true,
-    url: "https://appointment.ivacbd.com/*"
+    currentWindow: true
   });
   return tabs[0] || null;
+}
+
+function isIvAcSigninUrl(url) {
+  return /https:\/\/appointment\.ivacbd\.com\/signin(?:[/?#]|$)/i.test(String(url || ""));
+}
+
+function isIvAcUrl(url) {
+  return /^https:\/\/appointment\.ivacbd\.com\//i.test(String(url || ""));
 }
 
 async function ensureOffscreenDocument() {
@@ -236,8 +254,88 @@ async function injectContentScripts(tabId) {
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function pingContentScript(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: "PING_CONTENT" });
+    return response && response.ok ? response : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function ensureContentScripts(tabId, activeTabUrl) {
+  const initialPing = await pingContentScript(tabId);
+  if (initialPing) {
+    await setStatus({
+      debug: {
+        activeTabUrl,
+        injectionSuccess: true,
+        detectorState: initialPing.page || "Unknown",
+        workflowState: initialPing.workflowState || "IDLE",
+        contentScriptStatus: "Already attached",
+        lastRuntimeMessage: "PING_CONTENT"
+      }
+    });
+    return {
+      ok: true,
+      injected: false,
+      ping: initialPing
+    };
+  }
+
+  let lastError = "";
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await injectContentScripts(tabId);
+      await sleep(150 * attempt);
+      const ping = await pingContentScript(tabId);
+      if (ping) {
+        await setStatus({
+          debug: {
+            activeTabUrl,
+            injectionSuccess: true,
+            detectorState: ping.page || "Unknown",
+            workflowState: ping.workflowState || "IDLE",
+            contentScriptStatus: `Injected successfully on attempt ${attempt}`,
+            lastRuntimeMessage: "PING_CONTENT"
+          }
+        });
+        return {
+          ok: true,
+          injected: true,
+          attempt,
+          ping
+        };
+      }
+      lastError = `Content script ping failed after injection attempt ${attempt}.`;
+    } catch (error) {
+      lastError = error && error.message ? error.message : "Content script injection failed.";
+    }
+  }
+
+  await setStatus({
+    debug: {
+      activeTabUrl,
+      injectionSuccess: false,
+      contentScriptStatus: "Injection failed",
+      lastRuntimeMessage: "PING_CONTENT",
+      lastError
+    }
+  });
+  return {
+    ok: false,
+    error: lastError || "Content script did not respond after injection."
+  };
+}
+
 async function sendToActiveIvAcTab(message, options = {}) {
-  const tab = await getActiveIvAcTab();
+  const tab = await getActiveTab();
   if (!tab || !tab.id) {
     return {
       ok: false,
@@ -245,28 +343,82 @@ async function sendToActiveIvAcTab(message, options = {}) {
     };
   }
 
+  const activeTabUrl = tab.url || "";
+  await setStatus({
+    debug: {
+      activeTabUrl,
+      lastRuntimeMessage: message.type || "UNKNOWN"
+    }
+  });
+
+  if (options.requireSignin && !isIvAcSigninUrl(activeTabUrl)) {
+    const error = "Open https://appointment.ivacbd.com/signin in the active tab.";
+    return {
+      ok: false,
+      error,
+      tabId: tab.id,
+      activeTabUrl
+    };
+  }
+
+  if (!isIvAcUrl(activeTabUrl)) {
+    const error = "The active tab is not an IVAC appointment page.";
+    return {
+      ok: false,
+      error,
+      tabId: tab.id,
+      activeTabUrl
+    };
+  }
+
+  const ready = options.injectIfMissing
+    ? await ensureContentScripts(tab.id, activeTabUrl)
+    : { ok: Boolean(await pingContentScript(tab.id)) };
+
+  if (!ready.ok) {
+    return {
+      tabId: tab.id,
+      activeTabUrl,
+      ok: false,
+      error: ready.error || "Content script is not ready."
+    };
+  }
+
   try {
     const response = await chrome.tabs.sendMessage(tab.id, message);
-    return {
-      ok: true,
-      response,
-      tabId: tab.id
-    };
-  } catch (error) {
-    if (!options.injectIfMissing) {
-      return {
-        ok: false,
-        error: error && error.message ? error.message : "Content script is not ready."
-      };
-    }
-
-    await injectContentScripts(tab.id);
-    const response = await chrome.tabs.sendMessage(tab.id, message);
+    await setStatus({
+      debug: {
+        activeTabUrl,
+        injectionSuccess: true,
+        detectorState: response && response.page ? response.page : undefined,
+        workflowState: response && response.workflowState ? response.workflowState : undefined,
+        contentScriptStatus: "Message delivered",
+        lastRuntimeMessage: message.type || "UNKNOWN",
+        lastError: ""
+      }
+    });
     return {
       ok: true,
       response,
       tabId: tab.id,
-      injected: true
+      activeTabUrl,
+      injected: Boolean(ready.injected)
+    };
+  } catch (error) {
+    const messageText = error && error.message ? error.message : "Content script message failed.";
+    await setStatus({
+      debug: {
+        activeTabUrl,
+        contentScriptStatus: "Message failed",
+        lastRuntimeMessage: message.type || "UNKNOWN",
+        lastError: messageText
+      }
+    });
+    return {
+      ok: false,
+      error: messageText,
+      tabId: tab.id,
+      activeTabUrl
     };
   }
 }
@@ -316,7 +468,7 @@ async function setAutomation(enabled) {
   const tabResult = await sendToActiveIvAcTab({
     type: "START_AUTOMATION",
     settings
-  }, { injectIfMissing: enabled });
+  }, { injectIfMissing: enabled, requireSignin: true });
 
   if (!tabResult.ok) {
     await setSettings({ automationEnabled: false });
@@ -326,7 +478,13 @@ async function setAutomation(enabled) {
       automationEnabled: false,
       lastError: tabResult.error,
       actionRequired: "Open the IVAC sign-in page and press Start Automation.",
-      lastMessage: tabResult.error
+      lastMessage: tabResult.error,
+      debug: {
+        activeTabUrl: tabResult.activeTabUrl || "",
+        contentScriptStatus: "Start failed",
+        lastRuntimeMessage: "START_AUTOMATION",
+        lastError: tabResult.error
+      }
     });
     return tabResult;
   }
@@ -335,6 +493,7 @@ async function setAutomation(enabled) {
     ok: true,
     settings,
     tabId: tabResult.tabId,
+    activeTabUrl: tabResult.activeTabUrl,
     injected: Boolean(tabResult.injected)
   };
 }
@@ -467,9 +626,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message && message.type) {
       case "GET_STATE": {
+        const activeTab = await getActiveTab();
+        const status = await getStatus();
         sendResponse({
           settings: await getSettings(),
-          status: await getStatus(),
+          status: {
+            ...status,
+            debug: {
+              ...(status.debug || DEFAULT_STATUS.debug),
+              activeTabUrl: activeTab && activeTab.url ? activeTab.url : ""
+            }
+          },
           retryState: await storageGet(VF_KEYS.retryState, null)
         });
         break;
@@ -502,6 +669,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case "STATUS_UPDATE": {
         const status = await setStatus(message.status || {});
+        sendResponse({ ok: true, status });
+        break;
+      }
+
+      case "CONTENT_READY": {
+        const senderUrl = sender && sender.tab && sender.tab.url ? sender.tab.url : "";
+        const status = await setStatus({
+          currentPage: message.page || "UNKNOWN_PAGE",
+          workflowState: message.workflowState || VF_STATES.IDLE,
+          state: VF_STATE_LABELS[message.workflowState] || VF_STATE_LABELS.IDLE,
+          debug: {
+            activeTabUrl: senderUrl,
+            injectionSuccess: true,
+            detectorState: message.page || "UNKNOWN_PAGE",
+            workflowState: message.workflowState || VF_STATES.IDLE,
+            contentScriptStatus: "Ready",
+            lastRuntimeMessage: "CONTENT_READY",
+            lastError: ""
+          },
+          lastMessage: "Content script ready"
+        });
         sendResponse({ ok: true, status });
         break;
       }

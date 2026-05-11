@@ -23,10 +23,16 @@ window.VisaFlowXOtpMonitor = (() => {
 
     await window.VisaFlowXNotify.status({
       state: "OTP Detected",
-      currentPage: "OTP page",
+      currentPage: "OTP_PAGE",
       automationEnabled: false,
       otpDetected: true,
       timerStatus: "None",
+      debug: {
+        detectorState: "OTP_PAGE",
+        workflowState: "OTP_DETECTED",
+        contentScriptStatus: "Attached",
+        lastRuntimeMessage: "STATUS_UPDATE"
+      },
       lastMessage: "OTP page detected. Automation stopped."
     });
     await window.VisaFlowXNotify.notification(

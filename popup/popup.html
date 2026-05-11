@@ -160,6 +160,42 @@
           </p>
         </section>
       </details>
+
+      <details class="accordion debug-accordion">
+        <summary>Developer Debug</summary>
+        <section class="card debug-card" aria-label="Developer debug information">
+          <div class="debug-grid">
+            <div>
+              <span>Active tab URL</span>
+              <strong id="debugActiveTabUrl">Unknown</strong>
+            </div>
+            <div>
+              <span>Injection success</span>
+              <strong id="debugInjectionSuccess">No</strong>
+            </div>
+            <div>
+              <span>Detector state</span>
+              <strong id="debugDetectorState">Unknown</strong>
+            </div>
+            <div>
+              <span>Workflow state</span>
+              <strong id="debugWorkflowState">IDLE</strong>
+            </div>
+            <div>
+              <span>Content script</span>
+              <strong id="debugContentStatus">Not checked</strong>
+            </div>
+            <div>
+              <span>Last runtime message</span>
+              <strong id="debugLastRuntimeMessage">None</strong>
+            </div>
+            <div class="wide">
+              <span>Last error</span>
+              <strong id="debugLastError">None</strong>
+            </div>
+          </div>
+        </section>
+      </details>
     </main>
 
     <script src="../utils/constants.js"></script>

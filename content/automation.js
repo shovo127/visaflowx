@@ -1,5 +1,20 @@
 "use strict";
 
+if (window.VisaFlowXAutomationReady) {
+  if (window.VisaFlowXNotify && window.VisaFlowXDetector) {
+    window.VisaFlowXNotify.sendRuntimeMessage({
+      type: "CONTENT_READY",
+      page: window.VisaFlowXDetector.detectPage().type,
+      workflowState: window.VisaFlowXAutomation &&
+        window.VisaFlowXAutomation.controller &&
+        window.VisaFlowXAutomation.controller.state
+        ? window.VisaFlowXAutomation.controller.state
+        : "IDLE"
+    });
+  }
+} else {
+window.VisaFlowXAutomationReady = true;
+
 window.VisaFlowXAutomation = (() => {
   const constants = window.VisaFlowXConstants || {};
   const STATES = constants.WORKFLOW_STATES || {
@@ -31,10 +46,19 @@ window.VisaFlowXAutomation = (() => {
 
     async setState(state, patch = {}) {
       this.state = state;
+      const pageInfo = window.VisaFlowXDetector.detectPage();
       await window.VisaFlowXNotify.status({
         workflowState: state,
         state: this.getStateLabel(state),
         automationEnabled: this.running,
+        currentPage: patch.currentPage || pageInfo.type,
+        debug: {
+          detectorState: pageInfo.type,
+          workflowState: state,
+          contentScriptStatus: "Attached",
+          lastRuntimeMessage: "STATUS_UPDATE",
+          lastError: patch.lastError || ""
+        },
         ...patch
       });
     },
@@ -94,7 +118,7 @@ window.VisaFlowXAutomation = (() => {
       window.VisaFlowXOtpMonitor.reset();
       this.startObserver(settings);
       await this.setState(STATES.IDLE, {
-        currentPage: "Unknown",
+        currentPage: window.VisaFlowXDetector.detectPage().type,
         captchaState: "Unknown",
         otpDetected: false,
         lastError: "",
@@ -147,7 +171,7 @@ window.VisaFlowXAutomation = (() => {
       const delays = window.VisaFlowXTimers.getActiveDelays(settings);
       const credentials = await window.VisaFlowXStorage.getCredentials();
       await this.setState(STATES.AUTOFILLING, {
-        currentPage: "Login page",
+        currentPage: "LOGIN_PAGE",
         actionRequired: "No action required. Filling saved credentials.",
         lastMessage: "Autofilling credentials"
       });
@@ -156,7 +180,7 @@ window.VisaFlowXAutomation = (() => {
       const result = await window.VisaFlowXAutofill.fillCredentials(credentials);
       if (!result.ok) {
         await this.setState(STATES.ERROR, {
-          currentPage: "Login page",
+          currentPage: "LOGIN_PAGE",
           lastError: result.reason,
           actionRequired: "Refresh the IVAC page or update selectors if the form changed.",
           lastMessage: result.reason
@@ -171,6 +195,12 @@ window.VisaFlowXAutomation = (() => {
       if (!captcha.present) {
         await window.VisaFlowXNotify.status({
           captchaState: "Not detected",
+          debug: {
+            detectorState: window.VisaFlowXDetector.detectPage().type,
+            workflowState: this.state,
+            contentScriptStatus: "Attached",
+            lastRuntimeMessage: "STATUS_UPDATE"
+          },
           actionRequired: "No captcha widget detected. VisaFlowX will continue if Sign In is ready."
         });
         return true;
@@ -217,7 +247,7 @@ window.VisaFlowXAutomation = (() => {
       }
 
       await this.setState(STATES.WAITING_FOR_VERIFICATION, {
-        currentPage: "Login page",
+        currentPage: "LOGIN_PAGE",
         captchaState: "Waiting",
         actionRequired: "Complete the Cloudflare verification in the highlighted area.",
         lastMessage: "Waiting for Cloudflare verification"
@@ -234,7 +264,7 @@ window.VisaFlowXAutomation = (() => {
       const button = window.VisaFlowXDetector.findSignInButton();
       if (!window.VisaFlowXDetector.isSignInReady(button)) {
         await this.setState(STATES.PAGE_DETECTED, {
-          currentPage: "Login page",
+          currentPage: "LOGIN_PAGE",
           actionRequired: "Wait for the Sign In button to become available.",
           lastMessage: "Sign In button is not ready"
         });
@@ -243,7 +273,7 @@ window.VisaFlowXAutomation = (() => {
 
       const delays = window.VisaFlowXTimers.getActiveDelays(settings);
       await this.setState(STATES.SIGNING_IN, {
-        currentPage: "Login page",
+        currentPage: "LOGIN_PAGE",
         actionRequired: "No action required. VisaFlowX is signing in.",
         lastMessage: "Clicking Sign In"
       });
@@ -263,13 +293,19 @@ window.VisaFlowXAutomation = (() => {
     async handlePageState(pageInfo, settings) {
       await window.VisaFlowXNotify.status({
         currentPage: pageInfo.type,
-        automationEnabled: true
+        automationEnabled: true,
+        debug: {
+          detectorState: pageInfo.type,
+          workflowState: this.state,
+          contentScriptStatus: "Attached",
+          lastRuntimeMessage: "STATUS_UPDATE"
+        }
       });
 
       if (pageInfo.type === window.VisaFlowXDetector.PAGE_TYPES.OTP) {
         await this.stopForOtp();
         await this.setState(STATES.OTP_DETECTED, {
-          currentPage: "OTP page",
+          currentPage: "OTP_PAGE",
           automationEnabled: false,
           otpDetected: true,
           timerStatus: "None",
@@ -283,7 +319,7 @@ window.VisaFlowXAutomation = (() => {
       if (pageInfo.type === window.VisaFlowXDetector.PAGE_TYPES.SESSION_EXPIRED) {
         await this.setState(STATES.ERROR, {
           state: "Session Expired",
-          currentPage: "Session expired page",
+          currentPage: "SESSION_EXPIRED_PAGE",
           lastError: pageInfo.reason,
           actionRequired: "Refresh the IVAC page and start automation again.",
           lastMessage: pageInfo.reason
@@ -299,7 +335,7 @@ window.VisaFlowXAutomation = (() => {
 
       if (pageInfo.type === window.VisaFlowXDetector.PAGE_TYPES.MAINTENANCE) {
         await this.setState(STATES.ERROR, {
-          currentPage: "Maintenance page",
+          currentPage: "MAINTENANCE_PAGE",
           lastError: pageInfo.reason,
           actionRequired: "Wait until the IVAC portal is available again.",
           lastMessage: pageInfo.reason
@@ -347,7 +383,7 @@ window.VisaFlowXAutomation = (() => {
       }
 
       await this.setState(STATES.PAGE_DETECTED, {
-        currentPage: "Login page",
+        currentPage: "LOGIN_PAGE",
         actionRequired: "No action required. VisaFlowX is preparing login.",
         lastMessage: "Login page detected"
       });
@@ -430,7 +466,22 @@ window.VisaFlowXAutomation = (() => {
       return {
         ok: true,
         page: pageInfo.type,
+        workflowState: this.state,
         captcha
+      };
+    },
+
+    getSnapshot() {
+      const pageInfo = window.VisaFlowXDetector.detectPage();
+      const captcha = window.VisaFlowXDetector.detectCaptcha();
+      return {
+        ok: true,
+        page: pageInfo.type,
+        reason: pageInfo.reason,
+        workflowState: this.state,
+        running: this.running,
+        captchaState: captcha.present ? (captcha.verified ? "Verified" : "Waiting") : "Not detected",
+        contentScriptStatus: "Attached"
       };
     },
 
@@ -467,6 +518,10 @@ window.VisaFlowXAutomation = (() => {
             sendResponse(await AutomationController.testAutofill());
             break;
 
+          case "PING_CONTENT":
+            sendResponse(AutomationController.getSnapshot());
+            break;
+
           case "RETRY_ALARM_FIRED":
             window.VisaFlowXRetryEngine.clearLocalRetry();
             AutomationController.running = true;
@@ -494,6 +549,12 @@ window.VisaFlowXAutomation = (() => {
     });
 
     window.VisaFlowXStorage.getSettings().then((settings) => {
+      window.VisaFlowXNotify.sendRuntimeMessage({
+        type: "CONTENT_READY",
+        page: window.VisaFlowXDetector.detectPage().type,
+        workflowState: AutomationController.state
+      });
+
       if (settings.automationEnabled) {
         AutomationController.running = true;
         AutomationController.startObserver(settings);
@@ -527,3 +588,4 @@ window.VisaFlowXAutomation = (() => {
     controller: AutomationController
   };
 })();
+}
